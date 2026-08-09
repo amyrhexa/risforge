@@ -1,0 +1,2 @@
+[console_scripts]
+risforge = risforge.cli:main
