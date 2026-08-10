@@ -199,6 +199,59 @@ class _RecordUnionFind:
         return True
 
 
+def parse_ris_records(
+    input_path: str | Path,
+) -> tuple[list[RisRecord], list[tuple[int, str]]]:
+    """Parse a ``.ris`` file into records, tolerating malformed blocks.
+
+    Splits the file into individual ``TY  -`` ... ``ER  -`` blocks and
+    parses each independently, so a single malformed record doesn't
+    take down the whole file -- it's recorded as an error and skipped
+    rather than aborting the parse. This is the shared parsing routine
+    behind both :func:`clean_ris_file` and
+    :func:`risforge.merging.merge_ris_files`, so the two share
+    identical parsing and error-tolerance behavior.
+
+    Args:
+        input_path: Path to the source ``.ris`` file.
+
+    Returns:
+        A ``(records, errors)`` tuple: successfully parsed records (as
+        rispy record dicts, in file order), and a list of
+        ``(block_number, message)`` pairs for any blocks that failed
+        to parse.
+
+    Raises:
+        FileNotFoundError: If ``input_path`` does not exist.
+    """
+    input_path = Path(input_path)
+
+    if not input_path.exists():
+        raise FileNotFoundError(f"Input file '{input_path}' not found.")
+
+    text = input_path.read_text(encoding="utf-8")
+
+    blocks = re.split(r"(?m)^TY\s+-", text)
+    records: list[RisRecord] = []
+    errors: list[tuple[int, str]] = []
+
+    for index, block in enumerate(blocks):
+        if not block.strip():
+            continue
+
+        block_text = f"TY  -{block}"
+        try:
+            parsed_records = rispy.loads(block_text)
+            if not parsed_records:
+                errors.append((index + 1, "Empty parse result (malformed record)"))
+            else:
+                records.extend(parsed_records)
+        except (ValueError, TypeError, KeyError, AttributeError) as error:
+            errors.append((index + 1, str(error)))
+
+    return records, errors
+
+
 def clean_ris_file(
     input_path: str | Path, output_path: str | Path
 ) -> tuple[list[RisRecord], list[tuple[int, str]]]:
@@ -223,31 +276,9 @@ def clean_ris_file(
     Raises:
         FileNotFoundError: If ``input_path`` does not exist.
     """
-    input_path = Path(input_path)
     output_path = Path(output_path)
 
-    if not input_path.exists():
-        raise FileNotFoundError(f"Input file '{input_path}' not found.")
-
-    text = input_path.read_text(encoding="utf-8")
-
-    blocks = re.split(r"(?m)^TY\s+-", text)
-    records: list[RisRecord] = []
-    errors: list[tuple[int, str]] = []
-
-    for index, block in enumerate(blocks):
-        if not block.strip():
-            continue
-
-        block_text = f"TY  -{block}"
-        try:
-            parsed_records = rispy.loads(block_text)
-            if not parsed_records:
-                errors.append((index + 1, "Empty parse result (malformed record)"))
-            else:
-                records.extend(parsed_records)
-        except (ValueError, TypeError, KeyError, AttributeError) as error:
-            errors.append((index + 1, str(error)))
+    records, errors = parse_ris_records(input_path)
 
     if errors:
         logger.warning("Encountered %d malformed record block(s), skipped.", len(errors))
