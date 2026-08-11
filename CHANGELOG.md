@@ -4,7 +4,7 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/).
 
-## [0.3.0] - 2026-08-11
+## [0.3.1] - 2026-08-11
 
 ### Added
 - **Desktop GUI** (`risforge_gui`) — an optional PySide6 application for the

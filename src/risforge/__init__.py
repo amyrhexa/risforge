@@ -51,7 +51,7 @@ from risforge.exceptions import RisForgeError, RisParsingError
 from risforge.merging import MergeResult, merge_ris_files
 from risforge.pipeline import PipelineResult, risforge, run_pipeline
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 __all__ = [
     "clean_ris_file",
