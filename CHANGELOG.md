@@ -4,6 +4,44 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - 2026-08-11
+
+### Added
+- **Desktop GUI** (`risforge_gui`) — an optional PySide6 application for the
+  full merge/clean/enrich workflow, installed via `pip install
+  "risforge[gui]"` and launched with `risforge-gui`. It's a thin interface
+  layer: every operation calls the same public `risforge` API the CLI uses
+  (`risforge()`, `merge_ris_files()`, `clean_ris_file()`, `RisEnricher`) —
+  no cleaning, merging, deduplication, or enrichment logic is duplicated in
+  the GUI. Runs on Windows, macOS, and Linux.
+  - Drag-and-drop `.ris` file input with asynchronous, non-blocking record
+    counting.
+  - Automatic workflow selection (merge+clean+enrich for multiple files,
+    clean+enrich for one), plus standalone Merge/Clean/Enrich modes.
+  - Threaded execution (`QThread`) with real-time per-stage progress,
+    determinate enrichment progress (records processed/total), and an
+    expandable activity log — the GUI never freezes during a run.
+  - Human-readable error dialogs with expandable technical details; no raw
+    tracebacks shown by default.
+  - Non-destructive by default: original inputs are never modified, outputs
+    always go to a new folder, and existing output files require an explicit
+    overwrite confirmation.
+  - Light/dark/system theming, centralized in one stylesheet module.
+
+### Changed (core package, additive/backward-compatible)
+- `RisEnricher.enrich_file()` gained an optional `progress_callback`
+  parameter, invoked as `progress_callback(processed_count, total_count)`
+  after each record. Defaults to `None` (unused) — no behavior change for
+  existing callers. Added so the GUI (or any caller) can show real
+  determinate enrichment progress without polling or reimplementing
+  `enrich_file()`'s loop.
+- `risforge()` gained optional `on_stage` and `enrichment_progress`
+  parameters. `on_stage(stage, status)` fires around each phase
+  (`"merge"`/`"clean"`/`"enrich"`, `"started"`/`"completed"`);
+  `enrichment_progress` is forwarded to `RisEnricher.enrich_file()`. Both
+  default to `None` — no behavior change for existing callers, including
+  `run_pipeline()`, which does not expose these new parameters.
+
 ## [0.2.0] - 2026-08-10
 
 ### Added

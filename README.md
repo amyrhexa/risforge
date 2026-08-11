@@ -54,6 +54,8 @@ overlapping database exports — whether that's one export or several.
   enriched.
 - **Library or CLI** — use it as `import risforge` in a script/notebook,
   or as a single `risforge` command.
+- **Optional desktop GUI** — a cross-platform PySide6 app (`risforge-gui`)
+  for drag-and-drop use, with no command line required.
 
 ## Installation
 
@@ -62,6 +64,18 @@ pip install risforge
 ```
 
 Requires Python 3.10+.
+
+There's also an optional desktop GUI, for researchers who'd rather not use
+the command line:
+
+```bash
+pip install "risforge[gui]"
+risforge-gui
+```
+
+It's a thin PySide6 interface over this same package -- see
+[docs/gui.md](docs/gui.md) for the full walkthrough. The base install above
+never pulls in GUI dependencies.
 
 ## Quick start
 

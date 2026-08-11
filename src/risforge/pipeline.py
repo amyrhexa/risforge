@@ -24,7 +24,7 @@ pre-0.2.0 API -- including callers who used the original
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -93,6 +93,8 @@ def risforge(
     email: str,
     merge_path: str | Path | None = None,
     fail_report_path: str | Path = "failed_records.json",
+    on_stage: Callable[[str, str], None] | None = None,
+    enrichment_progress: Callable[[int, int], None] | None = None,
 ) -> PipelineResult:
     """Run the full merge(optional) -> clean -> enrich pipeline end to end.
 
@@ -118,6 +120,19 @@ def risforge(
             Ignored for a single input, since no merge step runs.
         fail_report_path: Where a JSON report of unresolved records is
             written, if any.
+        on_stage: Optional callback invoked as ``on_stage(stage,
+            status)`` around each phase, with ``stage`` one of
+            ``"merge"`` (only when multiple inputs are given),
+            ``"clean"``, or ``"enrich"``, and ``status`` one of
+            ``"started"`` or ``"completed"``. Added for callers (such
+            as a GUI) that want to reflect pipeline progress without
+            polling the filesystem or reimplementing this function's
+            control flow. Never called when omitted.
+        enrichment_progress: Optional callback forwarded to
+            :meth:`risforge.enrichment.RisEnricher.enrich_file` as
+            ``progress_callback``, invoked as
+            ``enrichment_progress(processed_count, total_count)``
+            after each record. Never called when omitted.
 
     Returns:
         A :class:`PipelineResult` summarizing every phase that ran.
@@ -139,7 +154,11 @@ def risforge(
             Path(merge_path) if merge_path is not None else _default_merge_path(dedup_path)
         )
         logger.info("Phase 0: Merging %d input files into %s", len(paths), resolved_merge_path)
+        if on_stage is not None:
+            on_stage("merge", "started")
         merge_result = merge_ris_files(paths, resolved_merge_path)
+        if on_stage is not None:
+            on_stage("merge", "completed")
         logger.info(
             "Phase 0 complete: merged %d record(s) from %d file(s).",
             merge_result.record_count,
@@ -150,18 +169,27 @@ def risforge(
         clean_input = paths[0]
 
     logger.info("Phase 1: Deduplicating %s", clean_input)
+    if on_stage is not None:
+        on_stage("clean", "started")
     records, errors = clean_ris_file(clean_input, dedup_path)
+    if on_stage is not None:
+        on_stage("clean", "completed")
     logger.info("Phase 1 complete: generated %d clean records.", len(records))
     if errors:
         logger.warning("Encountered %d parsing errors during Phase 1.", len(errors))
 
     logger.info("Phase 2: Initializing metadata enrichment via APIs")
+    if on_stage is not None:
+        on_stage("enrich", "started")
     enricher = RisEnricher(email=email)
     stats = enricher.enrich_file(
         input_path=dedup_path,
         output_path=enriched_path,
         fail_report_path=fail_report_path,
+        progress_callback=enrichment_progress,
     )
+    if on_stage is not None:
+        on_stage("enrich", "completed")
     logger.info(
         "Phase 2 complete: enriched %d/%d records.",
         stats.get("enriched", 0),

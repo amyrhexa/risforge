@@ -40,6 +40,7 @@ import json
 import logging
 import re
 import time
+from collections.abc import Callable
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
@@ -375,6 +376,7 @@ class RisEnricher:
         output_path: str | Path,
         fail_report_path: str | Path = "failed_records.json",
         request_delay_seconds: float = 0.1,
+        progress_callback: Callable[[int, int], None] | None = None,
     ) -> dict[str, Any]:
         """Enrich every record in a RIS file and write the result.
 
@@ -387,6 +389,14 @@ class RisEnricher:
             request_delay_seconds: Delay between records, to stay
                 within provider rate limits beyond the built-in retry
                 policy.
+            progress_callback: Optional callback invoked as
+                ``progress_callback(processed_count, total_count)``
+                after each record is processed. Added for callers
+                (such as a GUI) that want to report determinate
+                progress during a potentially slow, network-bound
+                operation, without polling or duplicating this loop
+                elsewhere. Never called when omitted -- zero behavior
+                change for existing callers.
 
         Returns:
             The accumulated ``self.stats`` dict.
@@ -403,9 +413,12 @@ class RisEnricher:
             logger.error("Failed to parse RIS file: %s", error)
             return self.stats
 
+        total = len(records)
         enriched_records = []
-        for record in records:
+        for index, record in enumerate(records):
             enriched_records.append(self.enrich_record(record))
+            if progress_callback is not None:
+                progress_callback(index + 1, total)
             if request_delay_seconds:
                 time.sleep(request_delay_seconds)
 

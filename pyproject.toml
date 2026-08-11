@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "risforge"
-version = "0.2.0"
+version = "0.3.0"
 description = "Clean, deduplicate, and enrich RIS bibliographic files for systematic reviews."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -50,6 +50,13 @@ dev = [
     "build>=1.2",
     "twine>=5.0",
 ]
+gui = [
+    "PySide6>=6.5",
+]
+gui-dev = [
+    "risforge[gui]",
+    "pytest-qt>=4.4",
+]
 
 [project.urls]
 Homepage = "https://github.com/amyr/risforge"
@@ -60,6 +67,9 @@ Changelog = "https://github.com/amyr/risforge/blob/main/CHANGELOG.md"
 [project.scripts]
 risforge = "risforge.cli:main"
 
+[project.gui-scripts]
+risforge-gui = "risforge_gui.app:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
@@ -68,3 +78,6 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.coverage.run]
+concurrency = ["thread"]
