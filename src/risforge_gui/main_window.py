@@ -353,6 +353,7 @@ class MainWindow(QMainWindow):
                 "input_records": stats.get("processed", 0),  # type: ignore[union-attr]
                 "enriched_records": stats.get("enriched", 0),  # type: ignore[union-attr]
                 "failed_enrichment": stats.get("failed", 0),  # type: ignore[union-attr]
+                "skipped_malformed": stats.get("skipped_malformed", 0),  # type: ignore[union-attr]
             }
             return summary, config.enriched_output_path, config.fail_report_path
 
@@ -363,6 +364,7 @@ class MainWindow(QMainWindow):
             "unique_records": result.cleaned_record_count,  # type: ignore[attr-defined]
             "enriched_records": result.enrichment_stats.get("enriched", 0),  # type: ignore[attr-defined]
             "failed_enrichment": result.enrichment_stats.get("failed", 0),  # type: ignore[attr-defined]
+            "skipped_malformed": result.enrichment_stats.get("skipped_malformed", 0),  # type: ignore[attr-defined]
         }
         return summary, config.enriched_output_path, config.fail_report_path
 

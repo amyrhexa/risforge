@@ -19,5 +19,20 @@ class RisForgeError(Exception):
     """Base class for errors raised directly by risforge's own logic."""
 
 
-class RisParsingError(RisForgeError):
-    """Raised when a RIS file cannot be parsed into any usable records."""
+class RisParsingError(RisForgeError, ValueError):
+    """Raised when a RIS file's content can't be decoded/read at all.
+
+    Deliberately inherits from ``ValueError`` too (like
+    ``json.JSONDecodeError`` does in the standard library) so every
+    existing ``except (OSError, ValueError, RuntimeError)`` clause
+    throughout this codebase (CLI, pipeline, GUI worker) already
+    catches it correctly, with no call site changes required. Catch
+    ``RisParsingError`` specifically, or ``RisForgeError`` generally,
+    for finer-grained handling.
+
+    This is for whole-file failures only (e.g. the file's bytes can't
+    be decoded as text) -- a malformed *individual record* within an
+    otherwise-readable file is not an error at this level; see
+    :func:`risforge.cleaning.parse_ris_records`, which tolerates and
+    reports those per-block instead of raising.
+    """

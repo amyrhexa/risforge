@@ -220,6 +220,67 @@ class TestStartToResultsFlow:
         assert window.results_panel._value_labels["unique_records"].text() == "1"
         assert window.results_panel._value_labels["enriched_records"].text() == "1"
 
+    def test_skipped_malformed_records_shown_only_when_nonzero(
+        self, qtbot, one_ris_file, tmp_path, monkeypatch
+    ) -> None:
+        """Regression test for the enrich_file() rispy KeyError fix.
+
+        Malformed records are now tolerated (not crashes) and reported
+        via PipelineResult.enrichment_stats["skipped_malformed"]; the
+        results screen should surface that count, but only when it's
+        actually nonzero, to avoid cluttering the common case.
+        """
+
+        def fake_risforge(
+            input_paths,
+            dedup_path,
+            enriched_path,
+            email,
+            merge_path,
+            fail_report_path,
+            on_stage,
+            enrichment_progress,
+        ):
+            on_stage("clean", "started")
+            on_stage("clean", "completed")
+            on_stage("enrich", "started")
+            enrichment_progress(1, 1)
+            on_stage("enrich", "completed")
+            Path(dedup_path).write_text("TY  - JOUR\nER  - \n", encoding="utf-8")
+            Path(enriched_path).write_text("TY  - JOUR\nER  - \n", encoding="utf-8")
+            return PipelineResult(
+                cleaned_record_count=1,
+                cleaning_errors=[],
+                enrichment_stats={
+                    "processed": 1,
+                    "enriched": 1,
+                    "failed": 0,
+                    "skipped_malformed": 2,
+                },
+                input_file_count=1,
+                merged_record_count=None,
+                merge_path=None,
+                dedup_path=Path(dedup_path),
+                enriched_path=Path(enriched_path),
+            )
+
+        monkeypatch.setattr("risforge_gui.worker.risforge", fake_risforge)
+
+        window = MainWindow()
+        qtbot.addWidget(window)
+        window.input_panel.add_dropped_paths([one_ris_file])
+        qtbot.waitUntil(lambda: window.input_panel.model.total_known_records() == 5, timeout=5000)
+        window.enrichment_panel.email_edit.setText("me@example.com")
+        window.output_panel.output_dir_edit.setText(str(tmp_path / "out"))
+
+        window._on_start_clicked()
+        qtbot.waitUntil(lambda: window.stack.currentWidget() is window.results_panel, timeout=5000)
+        window.worker.wait()
+
+        assert window.results_panel._value_labels["skipped_malformed"].text() == "2"
+        row = window.results_panel._summary_rows["skipped_malformed"]
+        assert window.results_panel._summary_form.isRowVisible(row) is True
+
     def test_error_during_run_shows_dialog_and_returns_to_setup(
         self, qtbot, one_ris_file, tmp_path, monkeypatch
     ) -> None:

@@ -23,6 +23,7 @@ _SUMMARY_LABELS = {
     "unique_records": "Unique records",
     "enriched_records": "Enriched records",
     "failed_enrichment": "Unresolved records",
+    "skipped_malformed": "Skipped (unreadable records)",
 }
 
 
@@ -47,9 +48,11 @@ class ResultsPanel(QWidget):
         summary_box = QGroupBox("Summary")
         self._summary_form = QFormLayout(summary_box)
         self._value_labels: dict[str, QLabel] = {}
-        for key, label_text in _SUMMARY_LABELS.items():
+        self._summary_rows: dict[str, int] = {}
+        for row, (key, label_text) in enumerate(_SUMMARY_LABELS.items()):
             value_label = QLabel("\u2014")
             self._value_labels[key] = value_label
+            self._summary_rows[key] = row
             self._summary_form.addRow(QLabel(label_text), value_label)
         layout.addWidget(summary_box)
 
@@ -94,6 +97,14 @@ class ResultsPanel(QWidget):
         for key, label in self._value_labels.items():
             value = summary.get(key)
             label.setText(f"{value:,}" if isinstance(value, int) else "\u2014")
+
+        # Keep the summary uncluttered for the common case: only show
+        # "Skipped (unreadable records)" when there's actually
+        # something to report, rather than a permanent "0" row.
+        skipped = summary.get("skipped_malformed")
+        row = self._summary_rows.get("skipped_malformed")
+        if row is not None:
+            self._summary_form.setRowVisible(row, bool(skipped))
 
         self._output_dir = output_dir
         self._final_ris_path = final_ris_path if final_ris_path and final_ris_path.exists() else None

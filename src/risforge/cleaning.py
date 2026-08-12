@@ -24,6 +24,8 @@ from typing import Any
 import rispy
 import rispy.writer
 
+from risforge.exceptions import RisParsingError
+
 logger = logging.getLogger(__name__)
 
 RisRecord = dict[str, Any]
@@ -223,13 +225,32 @@ def parse_ris_records(
 
     Raises:
         FileNotFoundError: If ``input_path`` does not exist.
+        RisParsingError: If the file's bytes can't be decoded as text
+            (for example, a non-UTF-8 file saved by an older Windows
+            reference manager). This does not cover malformed
+            *individual records* -- those are tolerated and reported
+            in ``errors`` instead.
     """
     input_path = Path(input_path)
 
     if not input_path.exists():
         raise FileNotFoundError(f"Input file '{input_path}' not found.")
 
-    text = input_path.read_text(encoding="utf-8")
+    try:
+        # utf-8-sig: identical to plain utf-8 for files with no BOM,
+        # but also transparently strips a leading UTF-8 byte-order
+        # mark if one is present. Windows text editors and some
+        # reference managers commonly save UTF-8 files with a BOM;
+        # left in place, it silently prevents the very first "TY" tag
+        # in the file from being recognized at all (no crash, just an
+        # empty result), which is worse than being explicit about it.
+        text = input_path.read_text(encoding="utf-8-sig")
+    except UnicodeDecodeError as error:
+        raise RisParsingError(
+            f"Could not read '{input_path}' as UTF-8 text. The file may be "
+            "saved in a different encoding (common with exports from older "
+            "reference managers) -- try re-saving it as UTF-8."
+        ) from error
 
     blocks = re.split(r"(?m)^TY\s+-", text)
     records: list[RisRecord] = []

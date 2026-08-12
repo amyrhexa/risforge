@@ -178,7 +178,11 @@ class PipelineWorker(QThread):
         )
         self.stage_changed.emit("enrich", "completed")
         self.stats_changed.emit(
-            {"enriched_records": stats.get("enriched", 0), "failed_enrichment": stats.get("failed", 0)}
+            {
+                "enriched_records": stats.get("enriched", 0),
+                "failed_enrichment": stats.get("failed", 0),
+                "skipped_malformed": stats.get("skipped_malformed", 0),
+            }
         )
         self.finished_ok.emit(stats)
 
@@ -202,6 +206,7 @@ class PipelineWorker(QThread):
                 "unique_records": result.cleaned_record_count,
                 "enriched_records": result.enrichment_stats.get("enriched", 0),
                 "failed_enrichment": result.enrichment_stats.get("failed", 0),
+                "skipped_malformed": result.enrichment_stats.get("skipped_malformed", 0),
             }
         )
         self.finished_ok.emit(result)

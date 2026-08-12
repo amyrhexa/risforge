@@ -32,6 +32,24 @@ file, and ``extract_doi()`` could never find a DOI that was already
 present on the record either, since it looked for ``"DO"`` instead of
 ``"doi"``. :data:`RISPY_FIELD_MAP` below uses rispy's real field
 names, and :meth:`RisEnricher.extract_doi` reads ``"doi"``/``"urls"``.
+
+A second bug was found and fixed the same way: :meth:`RisEnricher.enrich_file`
+used to call ``rispy.load()`` directly on the whole input file in one
+pass. ``rispy`` (as of 0.10.0) has its own bug where it tracks the
+"last tag seen" as parser-wide state that is never reset between
+records -- so a single stray blank or otherwise non-tag-pattern line
+positioned early in one record, right after a record boundary, can
+make it try to extend a field from the *previous* record onto the new
+record's (fresh, and therefore missing that key) dict, raising a
+``KeyError`` for whatever field that happened to be and aborting the
+entire file's enrichment. ``risforge.cleaning.parse_ris_records()``
+already sidesteps this by parsing each record block independently (a
+fresh parser instance per block, so there's no cross-record state to
+leak) -- ``enrich_file()`` now reuses that same function instead of
+calling ``rispy.load()`` itself, which both fixes the crash and means
+a malformed record is tolerated and reported exactly the way
+:func:`risforge.cleaning.clean_ris_file` already tolerates and reports
+one, rather than each module handling malformed input differently.
 """
 
 from __future__ import annotations
@@ -51,6 +69,8 @@ import requests_cache
 import rispy
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
+from risforge.cleaning import parse_ris_records
 
 TITLE_MATCH_THRESHOLD = 0.90
 CACHE_EXPIRE_DAYS = 7
@@ -125,6 +145,7 @@ class RisEnricher:
             "processed": 0,
             "enriched": 0,
             "failed": 0,
+            "skipped_malformed": 0,
             "api_calls": {
                 "crossref": 0,
                 "openalex": 0,
@@ -407,11 +428,19 @@ class RisEnricher:
 
         logger.info("Loading %s...", input_path)
         try:
-            with input_path.open("r", encoding="utf-8") as file:
-                records = list(rispy.load(file))
+            records, parse_errors = parse_ris_records(input_path)
         except (OSError, TypeError, ValueError) as error:
             logger.error("Failed to parse RIS file: %s", error)
             return self.stats
+
+        if parse_errors:
+            logger.warning(
+                "Encountered %d malformed record block(s) in %s, skipped: %s",
+                len(parse_errors),
+                input_path,
+                "; ".join(f"block {n}: {msg}" for n, msg in parse_errors),
+            )
+        self.stats["skipped_malformed"] = len(parse_errors)
 
         total = len(records)
         enriched_records = []

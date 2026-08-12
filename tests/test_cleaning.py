@@ -9,7 +9,9 @@ from risforge.cleaning import (
     merge_cluster,
     normalize_doi,
     normalize_title,
+    parse_ris_records,
 )
+from risforge.exceptions import RisParsingError
 
 
 class TestNormalizeTitle:
@@ -104,3 +106,77 @@ class TestCleanRisFile:
     def test_missing_input_raises(self, tmp_path) -> None:
         with pytest.raises(FileNotFoundError):
             clean_ris_file(tmp_path / "does_not_exist.ris", tmp_path / "out.ris")
+
+
+class TestParseRisRecordsEncoding:
+    """Regression tests for encoding-related parsing robustness.
+
+    These are not Windows-specific fixes (see the equivalent tests in
+    test_enrichment.py for the actual crash this was found alongside),
+    but a UTF-8 BOM in particular is disproportionately common in
+    files saved by Windows text editors and some reference managers,
+    so it's worth covering explicitly here too.
+    """
+
+    def test_utf8_bom_is_stripped_transparently(self, tmp_path) -> None:
+        ris_text = "TY  - JOUR\nAU  - Smith, John\nTI  - BOM paper\nER  - \n"
+        path = tmp_path / "bom.ris"
+        path.write_bytes(b"\xef\xbb\xbf" + ris_text.encode("utf-8"))
+
+        records, errors = parse_ris_records(path)
+
+        assert len(records) == 1
+        assert records[0]["title"] == "BOM paper"
+        assert errors == []
+
+    def test_non_utf8_bytes_raise_a_clear_parsing_error(self, tmp_path) -> None:
+        path = tmp_path / "bad_encoding.ris"
+        path.write_bytes(b"TY  - JOUR\nTI  - Bad \xff\xfe byte sequence\nER  - \n")
+
+        with pytest.raises(RisParsingError, match="bad_encoding.ris"):
+            parse_ris_records(path)
+
+    def test_parsing_error_is_also_a_value_error(self, tmp_path) -> None:
+        # RisParsingError intentionally also subclasses ValueError so
+        # every existing `except (..., ValueError, ...)` call site
+        # (CLI, pipeline, GUI worker) already catches it with no
+        # changes required at those call sites.
+        path = tmp_path / "bad_encoding.ris"
+        path.write_bytes(b"\xff\xfe\x00\x01")
+
+        with pytest.raises(ValueError):
+            parse_ris_records(path)
+
+
+class TestParseRisRecordsCrossRecordStateBug:
+    """Regression test for the rispy 0.10.0 cross-record state bug.
+
+    See risforge.enrichment's module docstring and
+    tests/test_enrichment.py::TestEnrichFileMalformedInput for the
+    full explanation. clean_ris_file() was never actually vulnerable
+    to this (each record block is parsed independently), but this
+    test pins that guarantee down explicitly so a future refactor
+    can't accidentally reintroduce the whole-file single-parse
+    pattern that enrich_file() used to use.
+    """
+
+    def test_stray_blank_line_after_record_boundary_does_not_crash(self, tmp_path) -> None:
+        ris_text = (
+            "TY  - JOUR\n"
+            "AU  - Smith, John\n"
+            "TI  - First paper\n"
+            "LA  - English\n"
+            "ER  - \n"
+            "\n"
+            "TY  - JOUR\n"
+            "\n"
+            "AU  - Doe, Jane\n"
+            "TI  - Second paper\n"
+            "ER  - \n"
+        )
+        path = tmp_path / "malformed.ris"
+        path.write_text(ris_text, encoding="utf-8")
+
+        records, errors = parse_ris_records(path)  # must not raise KeyError
+
+        assert len(records) == 2

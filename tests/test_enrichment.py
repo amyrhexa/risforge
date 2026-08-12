@@ -152,3 +152,93 @@ class TestEnrichFile:
         assert output_path.exists()
         assert stats["processed"] == 1
         assert stats["enriched"] == 1
+
+
+class TestEnrichFileMalformedInput:
+    """Regression tests for a rispy 0.10.0 bug: RisParser tracks the
+
+    "last tag seen" as state that persists across record boundaries
+    within a single ``rispy.load()``/``rispy.loads()`` call. A stray
+    blank (or otherwise non-tag-pattern) line positioned early in one
+    record -- right after a record boundary -- could make it try to
+    extend a field from the *previous* record onto the new record's
+    dict, which doesn't have that key yet, raising KeyError and
+    aborting the whole file. Reproduces identically on every platform
+    (verified on Linux); it is not a Windows-specific issue, just a
+    RIS-content issue that happened to be triggered first by files
+    tested on Windows. enrich_file() now parses via
+    risforge.cleaning.parse_ris_records() (block-isolated, immune to
+    this) instead of calling rispy.load() directly on the whole file.
+    """
+
+    def test_stray_blank_line_after_record_boundary_does_not_crash(self, tmp_path) -> None:
+        # Record 1 ends with an "LA" (language) tag as its last real
+        # field before ER. Record 2 has a stray blank line immediately
+        # after "TY", before its own first tag -- this is exactly the
+        # combination that crashed rispy.load() with KeyError('language').
+        ris_text = (
+            "TY  - JOUR\n"
+            "AU  - Smith, John\n"
+            "TI  - First paper\n"
+            "LA  - English\n"
+            "DO  - 10.1000/first\n"
+            "ER  - \n"
+            "\n"
+            "TY  - JOUR\n"
+            "\n"
+            "AU  - Doe, Jane\n"
+            "TI  - Second paper\n"
+            "DO  - 10.1000/second\n"
+            "ER  - \n"
+        )
+        input_path = tmp_path / "malformed.ris"
+        input_path.write_text(ris_text, encoding="utf-8")
+
+        enricher, _session = _make_enricher()
+        # Must not raise KeyError.
+        stats = enricher.enrich_file(str(input_path), str(tmp_path / "out.ris"))
+
+        assert stats["processed"] == 2
+
+    def test_genuinely_unparseable_block_is_skipped_and_counted(self, tmp_path) -> None:
+        ris_text = (
+            "TY  - JOUR\n"
+            "AU  - Smith, John\n"
+            "TI  - Valid paper\n"
+            "DO  - 10.1000/valid\n"
+            "ER  - \n"
+            "\n"
+            "TY  - JOUR\n"
+            "AU  - Broken, Record\n"
+            "TI  - Missing ER terminator entirely\n"
+        )
+        input_path = tmp_path / "genuinely_malformed.ris"
+        input_path.write_text(ris_text, encoding="utf-8")
+
+        enricher, _session = _make_enricher()
+        stats = enricher.enrich_file(str(input_path), str(tmp_path / "out.ris"))
+
+        assert stats["processed"] == 1
+        assert stats["skipped_malformed"] == 1
+
+    def test_utf8_bom_is_handled_transparently(self, tmp_path) -> None:
+        ris_text = "TY  - JOUR\nAU  - Smith, John\nTI  - BOM paper\nDO  - 10.1000/bom\nER  - \n"
+        input_path = tmp_path / "bom.ris"
+        input_path.write_bytes(b"\xef\xbb\xbf" + ris_text.encode("utf-8"))
+
+        enricher, _session = _make_enricher()
+        stats = enricher.enrich_file(str(input_path), str(tmp_path / "out.ris"))
+
+        assert stats["processed"] == 1
+
+    def test_non_utf8_file_gives_a_clear_error_without_crashing(self, tmp_path) -> None:
+        input_path = tmp_path / "bad_encoding.ris"
+        input_path.write_bytes(b"TY  - JOUR\nTI  - Bad \xff\xfe byte sequence\nER  - \n")
+
+        enricher, _session = _make_enricher()
+        # enrich_file()'s existing contract: parsing failures are
+        # logged and it returns the (unmodified) stats rather than
+        # raising, exactly as it already did for a missing input file.
+        stats = enricher.enrich_file(str(input_path), str(tmp_path / "out.ris"))
+
+        assert stats["processed"] == 0

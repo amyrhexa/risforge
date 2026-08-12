@@ -4,7 +4,41 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/).
 
-## [0.3.1] - 2026-08-11
+## [0.3.2] - 2026-08-12
+
+### Fixed
+- **Crash during enrichment**: `RisEnricher.enrich_file()` could raise
+  `KeyError` (e.g. `KeyError: 'language'`) and abort the entire run when a
+  RIS file contained a stray blank or otherwise non-tag-pattern line
+  positioned early in a record. Root cause: a bug in `rispy` 0.10.0, where
+  its parser tracks "the last tag seen" as state that persists *across
+  record boundaries* within a single `rispy.load()` call — a malformed line
+  at the start of one record could make it try to extend a field from the
+  *previous* record onto the new (and therefore missing that key) record.
+  Reproduces identically on every OS; it was not actually Windows-specific,
+  though it was first reported there. `enrich_file()` now parses via
+  `risforge.cleaning.parse_ris_records()` (already immune, since each
+  record block gets an independent parser instance) instead of calling
+  `rispy.load()` directly on the whole file. Malformed blocks are now
+  tolerated and logged — exactly like `clean_ris_file()` already does —
+  instead of aborting the run, and counted in a new `stats["skipped_malformed"]`.
+- **UTF-8 BOM in RIS files** (common from Windows text editors) previously
+  caused the first record's `TY` tag to go unrecognized, silently returning
+  zero records with no error. Files are now read with `utf-8-sig`, which
+  transparently strips a BOM if present and is a no-op otherwise.
+- **Non-UTF-8 files** previously raised a raw `UnicodeDecodeError`. They now
+  raise `RisParsingError` (a new use of an already-defined-but-previously-unused
+  exception class) with a clear, actionable message naming the file. It's
+  also a `ValueError` subclass, so every existing exception handler in the
+  CLI, pipeline, and GUI worker already catches it correctly with no changes
+  needed at those call sites.
+
+### Changed (GUI)
+- The results screen now shows a "Skipped (unreadable records)" row,
+  visible only when that count is nonzero, so malformed input is visible to
+  the user without cluttering the common case.
+
+## [0.3.0] - 2026-08-11
 
 ### Added
 - **Desktop GUI** (`risforge_gui`) — an optional PySide6 application for the
