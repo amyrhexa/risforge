@@ -4,7 +4,62 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/).
 
-## [0.3.2] - 2026-08-12
+## [0.3.3] - 2026-08-14
+
+A non-functional clean-code audit pass across the whole codebase: naming,
+documentation, logging, and formatting, with no intended behavior changes.
+`ruff` and `black` (configured at a project-standard 100-char line length,
+now pinned in `pyproject.toml`) were run across all of `src/` as an
+objective check rather than relying on manual review alone; every change
+below traces back to a real, tool- or hand-verified finding.
+
+### Fixed
+- **`risforge_gui/file_counter.py`**: `RecordCounter.run()` caught `OSError`
+  but not `ValueError`, so a dropped/added file that fails to decode (see
+  the `RisParsingError` handling added in 0.3.1) would raise uncaught on a
+  `QThreadPool` worker thread -- its row would stay at "Counting..."
+  forever with no visible error. Now also catches `ValueError`. Found
+  during this audit, not previously reported; added a regression test that
+  fails against the old code and passes against the fix.
+
+### Changed (non-functional)
+- Extracted a repeated magic number (`timeout=10`, five call sites) in
+  `enrichment.py` into `REQUEST_TIMEOUT_SECONDS`.
+- Renamed a handful of overly terse identifiers for clarity: `enrichment.py`
+  (`c` &rarr; `concept`), `risforge_gui/theme.py` (`_build_stylesheet`'s `p`
+  &rarr; `palette`, 40 call sites).
+- `risforge_gui/app.py`: replaced a `print(..., file=sys.stderr)` with
+  `logger.error(...)`; verified byte-identical stderr output via Python's
+  default "last resort" log handler.
+- `risforge_gui/worker.py`: replaced a nested ternary with an if/elif/else
+  chain for the log-level mapping (readability only; verified an identical
+  result for every possible log level).
+- Removed two dead imports (`risforge_gui/worker.py`'s `typing.Any`,
+  `risforge_gui/main_window.py`'s `PySide6.QtCore.Qt`), found via `ruff`.
+- Added rationale-focused docstrings to the methods where the "why" wasn't
+  already obvious from the name and signature (Qt model role-dispatch,
+  drag/drop handlers, threaded worker entry points, stateful progress/log
+  update methods) -- deliberately not added to ~30 trivial one-line
+  property-style getters, to avoid restating the obvious.
+- Reformatted `cleaning.py`, `cli.py`, `enrichment.py`, `merging.py`, and
+  several GUI widget files to a consistent 100-character line width (the
+  codebase's established but previously unenforced convention); no line's
+  *content* changed, only wrapping.
+- `risforge_gui/models.py`: kept `QModelIndex()` as a Qt-idiomatic default
+  argument (this is the standard pattern from Qt's own Model/View
+  documentation, not the mutable-default-argument bug a generic linter
+  flags it as) and documented why, rather than "fixing" it away.
+
+### Notes
+- Evaluated three boolean-expression candidates for De Morgan's-law
+  simplification (`cleaning.py`, `enrichment.py`, `main_window.py`) and
+  left all three unchanged: each was already in its clearest form, and one
+  (`main_window.py`'s overwrite-confirmation check) short-circuits a
+  function with a real side effect (a modal dialog), where reordering the
+  operands -- even via an equivalent-truth-table transform -- would risk
+  changing when that dialog fires.
+
+## [0.3.1] - 2026-08-12
 
 ### Fixed
 - **Crash during enrichment**: `RisEnricher.enrich_file()` could raise

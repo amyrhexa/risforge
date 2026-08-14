@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 import rispy
 
@@ -173,9 +171,7 @@ class TestDeterministicOrdering:
         merge_ris_files(multi_source_paths, forward_path)
         merge_ris_files(list(reversed(multi_source_paths)), reversed_path)
 
-        forward_titles = [
-            r.get("title") for r in rispy.load(open(forward_path, encoding="utf-8"))
-        ]
+        forward_titles = [r.get("title") for r in rispy.load(open(forward_path, encoding="utf-8"))]
         reversed_titles = [
             r.get("title") for r in rispy.load(open(reversed_path, encoding="utf-8"))
         ]

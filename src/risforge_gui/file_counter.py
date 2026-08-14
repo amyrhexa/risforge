@@ -30,12 +30,21 @@ class RecordCounter(QRunnable):
         self._path = path
         self.signals = _CounterSignals()
 
-    def run(self) -> None:  # noqa: D102 -- QRunnable interface
+    def run(self) -> None:
+        """Parse the file and report success/failure via signals.
+
+        Catches ValueError alongside OSError specifically because
+        ``parse_ris_records`` raises ``RisParsingError`` (a ValueError
+        subclass) for files that can't be decoded as text -- without
+        this, such a file would raise out of a QThreadPool worker
+        uncaught, and its row would be stuck at "Counting..." forever
+        with no visible error at all.
+        """
         try:
             records, errors = parse_ris_records(self._path)
         except FileNotFoundError:
             self.signals.failed.emit(self._path, "File not found.")
-        except OSError as error:
+        except (OSError, ValueError) as error:
             self.signals.failed.emit(self._path, f"Could not read file: {error}")
         else:
             self.signals.finished.emit(self._path, len(records), len(errors))

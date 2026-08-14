@@ -16,6 +16,8 @@ from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
 
 @dataclass
 class InputFileEntry:
+    """One row's state: a file path plus its (possibly still-pending) record count."""
+
     path: Path
     record_count: int | None = None  # None while counting is in progress.
     status: str = "Counting..."
@@ -33,18 +35,30 @@ class InputFilesModel(QAbstractTableModel):
 
     # --- Qt model interface -----------------------------------------------
 
-    def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:  # noqa: N802
+    def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:  # noqa: B008
+        # QModelIndex() as a default is the standard Qt Model/View idiom
+        # (used verbatim in Qt's own documentation): it's an immutable
+        # "invalid index" value, not mutable state that could leak
+        # between calls, so constructing it once at import time is safe.
         return 0 if parent.isValid() else len(self._entries)
 
-    def columnCount(self, parent: QModelIndex = QModelIndex()) -> int:  # noqa: N802
+    def columnCount(self, parent: QModelIndex = QModelIndex()) -> int:  # noqa: B008
         return 0 if parent.isValid() else len(self.COLUMNS)
 
-    def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):  # noqa: N802
+    def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
         if orientation == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole:
             return self.COLUMNS[section]
         return None
 
     def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole):
+        """Return display/tooltip/alignment data for one cell.
+
+        Branches on ``role`` because Qt's view asks the model the same
+        question ("what goes in this cell?") several times with
+        different intents -- text to show, tooltip to show, how to
+        align it -- rather than the model exposing separate methods
+        per concern.
+        """
         if not index.isValid() or not (0 <= index.row() < len(self._entries)):
             return None
         entry = self._entries[index.row()]
@@ -66,7 +80,8 @@ class InputFilesModel(QAbstractTableModel):
             return Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
         return None
 
-    def flags(self, index: QModelIndex):  # noqa: N802
+    def flags(self, index: QModelIndex):
+        """Selectable but never editable -- this table is for review, not inline editing."""
         if not index.isValid():
             return Qt.ItemFlag.NoItemFlags
         return Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
@@ -129,7 +144,7 @@ class InputFilesModel(QAbstractTableModel):
                 return
 
     def total_known_records(self) -> int | None:
-        """Sum of record counts for entries that finished counting, or None if any are still pending/errored."""
+        """Sum of counted records, or None while any entry is still pending/errored."""
         if any(entry.record_count is None for entry in self._entries):
             return None
         return sum(entry.record_count or 0 for entry in self._entries)

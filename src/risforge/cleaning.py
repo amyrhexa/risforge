@@ -147,11 +147,7 @@ def merge_cluster(cluster: list[RisRecord]) -> RisRecord:
                 for item in value:
                     if item not in merged[key]:
                         merged[key].append(item)
-            elif (
-                isinstance(merged[key], str)
-                and not merged[key]
-                and isinstance(value, str)
-            ):
+            elif isinstance(merged[key], str) and not merged[key] and isinstance(value, str):
                 merged[key] = value
 
     return merged
@@ -346,9 +342,7 @@ def clean_ris_file(
     for index in range(total_records):
         clusters[union_find.find(index)].append(index)
 
-    final_records = [
-        merge_cluster([records[i] for i in indices]) for indices in clusters.values()
-    ]
+    final_records = [merge_cluster([records[i] for i in indices]) for indices in clusters.values()]
 
     total_duplicates_removed = doi_duplicates_removed + title_author_duplicates_removed
 

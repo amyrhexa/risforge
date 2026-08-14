@@ -99,9 +99,7 @@ class TestMultiInputPipeline:
         )
 
         cleaned_records = list(rispy.load(open(dedup_path, encoding="utf-8")))
-        shared_paper = next(
-            r for r in cleaned_records if "Tractography" in (r.get("title") or "")
-        )
+        shared_paper = next(r for r in cleaned_records if "Tractography" in (r.get("title") or ""))
         # abstract came from pubmed.ris, keywords came from wos.ris --
         # merge_cluster() is what combines them into the one surviving record.
         assert shared_paper["abstract"] == (
@@ -129,9 +127,7 @@ class TestMultiInputPipeline:
         )
 
         enriched_records = list(rispy.load(open(enriched_path, encoding="utf-8")))
-        shared_paper = next(
-            r for r in enriched_records if "Tractography" in (r.get("title") or "")
-        )
+        shared_paper = next(r for r in enriched_records if "Tractography" in (r.get("title") or ""))
         # Kept from the original cleaned record, not overwritten by the
         # mocked Crossref payload's different title/journal:
         assert shared_paper["title"] == "Deep Learning for Diffusion MRI Tractography"

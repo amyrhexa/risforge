@@ -25,7 +25,7 @@ from risforge_gui.models import InputFilesModel
 
 
 class InputPanel(QGroupBox):
-    """"Input files" group box: table + add/remove controls + drag-and-drop."""
+    """ "Input files" group box: table + add/remove controls + drag-and-drop."""
 
     files_changed = Signal()
 
@@ -57,8 +57,12 @@ class InputPanel(QGroupBox):
         self.table.setAlternatingRowColors(True)
         self.table.horizontalHeader().setStretchLastSection(False)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.table.horizontalHeader().setSectionResizeMode(
+            2, QHeaderView.ResizeMode.ResizeToContents
+        )
         self.table.verticalHeader().setVisible(False)
         self.table.setMinimumHeight(140)
         self.table.setAccessibleName("Input files table")
@@ -103,7 +107,9 @@ class InputPanel(QGroupBox):
         folder = QFileDialog.getExistingDirectory(self, "Add folder of RIS files", str(Path.home()))
         if not folder:
             return
-        found = sorted(p for p in Path(folder).iterdir() if p.is_file() and p.suffix.lower() == ".ris")
+        found = sorted(
+            p for p in Path(folder).iterdir() if p.is_file() and p.suffix.lower() == ".ris"
+        )
         if not found:
             QMessageBox.information(
                 self, "No RIS files found", f"No .ris files were found directly inside:\n{folder}"
@@ -150,11 +156,13 @@ class InputPanel(QGroupBox):
 
     # --- Drag and drop -------------------------------------------------------------
 
-    def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        """Accept any drag containing file URLs; actual .ris filtering happens on drop."""
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
 
-    def dropEvent(self, event: QDropEvent) -> None:  # noqa: N802
+    def dropEvent(self, event: QDropEvent) -> None:
+        """Route dropped files through add_dropped_paths() for consistent .ris filtering."""
         paths = [Path(url.toLocalFile()) for url in event.mimeData().urls() if url.isLocalFile()]
         if paths:
             self.add_dropped_paths(paths)

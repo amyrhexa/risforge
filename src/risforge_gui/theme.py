@@ -19,6 +19,8 @@ from PySide6.QtWidgets import QApplication
 
 
 class Theme(str, Enum):
+    """Selectable appearance modes; SYSTEM defers to the OS light/dark preference."""
+
     LIGHT = "light"
     DARK = "dark"
     SYSTEM = "system"
@@ -61,7 +63,7 @@ DARK_PALETTE: dict[str, str] = {
 }
 
 
-def _build_stylesheet(p: dict[str, str]) -> str:
+def _build_stylesheet(palette: dict[str, str]) -> str:
     """Render a palette dict into a Qt stylesheet.
 
     Kept as one template so the two palettes can never drift into
@@ -69,18 +71,18 @@ def _build_stylesheet(p: dict[str, str]) -> str:
     """
     return f"""
     QWidget {{
-        background-color: {p['bg']};
-        color: {p['text']};
+        background-color: {palette["bg"]};
+        color: {palette["text"]};
         font-size: 13px;
     }}
 
     QMainWindow, #SetupPage, #ProgressPage, #ResultsPage {{
-        background-color: {p['bg']};
+        background-color: {palette["bg"]};
     }}
 
     QGroupBox {{
-        background-color: {p['surface']};
-        border: 1px solid {p['border']};
+        background-color: {palette["surface"]};
+        border: 1px solid {palette["border"]};
         border-radius: 6px;
         margin-top: 14px;
         padding: 12px;
@@ -90,7 +92,7 @@ def _build_stylesheet(p: dict[str, str]) -> str:
         subcontrol-origin: margin;
         left: 10px;
         padding: 0 4px;
-        color: {p['text']};
+        color: {palette["text"]};
     }}
 
     QLabel#HeaderTitle {{
@@ -98,10 +100,10 @@ def _build_stylesheet(p: dict[str, str]) -> str:
         font-weight: 700;
     }}
     QLabel#HeaderSubtitle, QLabel#MutedLabel, QLabel#HelperText {{
-        color: {p['text_muted']};
+        color: {palette["text_muted"]};
     }}
     QLabel#VersionLabel {{
-        color: {p['text_muted']};
+        color: {palette["text_muted"]};
         font-size: 11px;
     }}
     QLabel#SectionHeading {{
@@ -110,82 +112,82 @@ def _build_stylesheet(p: dict[str, str]) -> str:
     }}
 
     QPushButton {{
-        background-color: {p['surface']};
-        border: 1px solid {p['border']};
+        background-color: {palette["surface"]};
+        border: 1px solid {palette["border"]};
         border-radius: 5px;
         padding: 6px 14px;
     }}
     QPushButton:hover {{
-        border-color: {p['accent']};
+        border-color: {palette["accent"]};
     }}
     QPushButton:pressed {{
-        background-color: {p['surface_alt']};
+        background-color: {palette["surface_alt"]};
     }}
     QPushButton:disabled {{
-        color: {p['text_muted']};
+        color: {palette["text_muted"]};
     }}
     QPushButton#PrimaryButton {{
-        background-color: {p['accent']};
-        color: {p['accent_text']};
+        background-color: {palette["accent"]};
+        color: {palette["accent_text"]};
         border: none;
         font-weight: 600;
         padding: 8px 20px;
     }}
     QPushButton#PrimaryButton:hover {{
-        background-color: {p['accent_hover']};
+        background-color: {palette["accent_hover"]};
     }}
     QPushButton#PrimaryButton:disabled {{
-        background-color: {p['border']};
-        color: {p['text_muted']};
+        background-color: {palette["border"]};
+        color: {palette["text_muted"]};
     }}
 
     QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
-        background-color: {p['surface']};
-        border: 1px solid {p['border']};
+        background-color: {palette["surface"]};
+        border: 1px solid {palette["border"]};
         border-radius: 4px;
         padding: 4px 6px;
-        selection-background-color: {p['accent']};
+        selection-background-color: {palette["accent"]};
     }}
     QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {{
-        border: 1px solid {p['focus']};
+        border: 1px solid {palette["focus"]};
     }}
     QLineEdit:read-only {{
-        color: {p['text_muted']};
+        color: {palette["text_muted"]};
     }}
 
     QTableView {{
-        background-color: {p['surface']};
-        alternate-background-color: {p['surface_alt']};
-        gridline-color: {p['border']};
-        border: 1px solid {p['border']};
+        background-color: {palette["surface"]};
+        alternate-background-color: {palette["surface_alt"]};
+        gridline-color: {palette["border"]};
+        border: 1px solid {palette["border"]};
         border-radius: 4px;
-        selection-background-color: {p['accent']};
-        selection-color: {p['accent_text']};
+        selection-background-color: {palette["accent"]};
+        selection-color: {palette["accent_text"]};
     }}
     QHeaderView::section {{
-        background-color: {p['surface_alt']};
-        color: {p['text']};
+        background-color: {palette["surface_alt"]};
+        color: {palette["text"]};
         border: none;
-        border-bottom: 1px solid {p['border']};
+        border-bottom: 1px solid {palette["border"]};
         padding: 4px 6px;
         font-weight: 600;
     }}
 
     QProgressBar {{
-        background-color: {p['surface_alt']};
-        border: 1px solid {p['border']};
+        background-color: {palette["surface_alt"]};
+        border: 1px solid {palette["border"]};
         border-radius: 4px;
         text-align: center;
         height: 18px;
     }}
     QProgressBar::chunk {{
-        background-color: {p['accent']};
+        background-color: {palette["accent"]};
         border-radius: 3px;
     }}
 
     QPlainTextEdit#LogPanel {{
-        background-color: {p['surface']};
-        border: 1px solid {p['border']};
+        background-color: {palette["surface"]};
+        border: 1px solid {palette["border"]};
         border-radius: 4px;
         font-family: "Menlo", "Consolas", monospace;
         font-size: 12px;
@@ -193,10 +195,10 @@ def _build_stylesheet(p: dict[str, str]) -> str:
 
     QToolButton {{
         border: none;
-        color: {p['text_muted']};
+        color: {palette["text_muted"]};
     }}
     QToolButton:hover {{
-        color: {p['text']};
+        color: {palette["text"]};
     }}
 
     QScrollArea {{
@@ -208,7 +210,7 @@ def _build_stylesheet(p: dict[str, str]) -> str:
         outline: none;
     }}
     QPushButton:focus, QComboBox:focus, QCheckBox:focus {{
-        border: 2px solid {p['focus']};
+        border: 2px solid {palette["focus"]};
     }}
     """
 

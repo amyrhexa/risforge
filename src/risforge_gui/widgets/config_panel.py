@@ -29,7 +29,7 @@ def default_cache_path() -> Path:
 
 
 class EnrichmentConfigPanel(QGroupBox):
-    """"Enrichment settings" group box."""
+    """ "Enrichment settings" group box."""
 
     changed = Signal()
 
@@ -119,7 +119,10 @@ class EnrichmentConfigPanel(QGroupBox):
 
     def _browse_fail_report(self) -> None:
         path, _filter = QFileDialog.getSaveFileName(
-            self, "Choose failure report location", self.fail_report_edit.text(), "JSON files (*.json)"
+            self,
+            "Choose failure report location",
+            self.fail_report_edit.text(),
+            "JSON files (*.json)",
         )
         if path:
             self.fail_report_edit.setText(path)

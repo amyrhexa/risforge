@@ -81,11 +81,19 @@ class ProgressPanel(QWidget):
 
     def _toggle_log(self, checked: bool) -> None:
         self.log_panel.setVisible(checked)
-        self.log_toggle.setText("Hide activity log \u25b4" if checked else "Show activity log \u25be")
+        self.log_toggle.setText(
+            "Hide activity log \u25b4" if checked else "Show activity log \u25be"
+        )
 
     # --- Public update API, called from MainWindow's signal-connected slots ---
 
     def reset(self, stages_in_use: list[str]) -> None:
+        """Prepare the panel for a new run.
+
+        Only the stages actually applicable to this run's mode are
+        made visible (e.g. no "Merge" bar for a single-file pipeline)
+        so the layout doesn't imply a step that isn't going to happen.
+        """
         for stage_key, bar in self._bars.items():
             in_use = stage_key in stages_in_use
             bar.setVisible(in_use)
@@ -98,6 +106,7 @@ class ProgressPanel(QWidget):
         self.current_activity_label.setText("")
 
     def set_stage_status(self, stage: str, status: str) -> None:
+        """Reflect a merge/clean/enrich stage's started/completed transition."""
         bar = self._bars.get(stage)
         if bar is None:
             return
@@ -115,6 +124,7 @@ class ProgressPanel(QWidget):
             self.current_activity_label.setText(f"{title} complete.")
 
     def set_enrichment_progress(self, processed: int, total: int) -> None:
+        """Show real, determinate progress -- unlike merge/clean, enrichment reports per-record."""
         bar = self._bars.get("enrich")
         if bar is None or total <= 0:
             return
@@ -124,6 +134,13 @@ class ProgressPanel(QWidget):
         self.current_activity_label.setText(f"Enriching record {processed:,} of {total:,}...")
 
     def update_stats(self, stats: dict) -> None:
+        """Update whichever stat labels this run's stats dict has values for.
+
+        Silently ignores keys the panel doesn't display and ``None``
+        values (used for stats that don't apply to the current mode,
+        e.g. "merged records" for a single-file run) rather than
+        overwriting the placeholder dash with "None".
+        """
         for key, value in stats.items():
             label = self._stat_value_labels.get(key)
             if label is None or value is None:

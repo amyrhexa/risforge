@@ -29,10 +29,7 @@ def run_full_pipeline(email: str, input_paths: list[str]) -> None:
     print(f"Input files: {result.input_file_count}")
     print(f"Merged records (duplicates included): {result.merged_record_count}")
     print(f"Unique records after cleaning: {result.cleaned_record_count}")
-    print(
-        f"Enriched: {result.enrichment_stats['enriched']}/"
-        f"{result.enrichment_stats['processed']}"
-    )
+    print(f"Enriched: {result.enrichment_stats['enriched']}/{result.enrichment_stats['processed']}")
 
 
 def run_steps_separately(email: str, input_paths: list[str]) -> None:

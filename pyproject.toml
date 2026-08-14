@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "risforge"
-version = "0.3.2"
+version = "0.3.3"
 description = "Clean, deduplicate, and enrich RIS bibliographic files for systematic reviews."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -59,10 +59,10 @@ gui-dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/pythyn/risforge"
-Repository = "https://github.com/pythyn/risforge"
-Issues = "https://github.com/pythyn/risforge/issues"
-Changelog = "https://github.com/pythyn/risforge/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/amyr/risforge"
+Repository = "https://github.com/amyr/risforge"
+Issues = "https://github.com/amyr/risforge/issues"
+Changelog = "https://github.com/amyr/risforge/blob/main/CHANGELOG.md"
 
 [project.scripts]
 risforge = "risforge.cli:main"
@@ -81,3 +81,10 @@ testpaths = ["tests"]
 
 [tool.coverage.run]
 concurrency = ["thread"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310", "py311", "py312"]
+
+[tool.ruff]
+line-length = 100

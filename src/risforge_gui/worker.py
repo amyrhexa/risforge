@@ -23,7 +23,6 @@ import logging
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any
 
 from PySide6.QtCore import QThread, Signal
 
@@ -69,9 +68,18 @@ class _LogBridge(logging.Handler):
         self._log_signal = log_signal
 
     def emit(self, record: logging.LogRecord) -> None:
-        level = "ERROR" if record.levelno >= logging.ERROR else (
-            "WARNING" if record.levelno >= logging.WARNING else "INFO"
-        )
+        """Map a stdlib log level to the three-tier severity the GUI displays.
+
+        The log panel only distinguishes INFO/WARNING/ERROR (matching
+        the UI's three status colors); DEBUG-and-below is never
+        forwarded at all (the handler is installed at level INFO).
+        """
+        if record.levelno >= logging.ERROR:
+            level = "ERROR"
+        elif record.levelno >= logging.WARNING:
+            level = "WARNING"
+        else:
+            level = "INFO"
         self._log_signal.emit(level, record.getMessage())
 
 
@@ -89,7 +97,14 @@ class PipelineWorker(QThread):
         super().__init__(parent)
         self._config = config
 
-    def run(self) -> None:  # noqa: D102 -- QThread interface
+    def run(self) -> None:
+        """Execute the configured operation and always emit a terminal signal.
+
+        Every exception type risforge's own API documents raising is
+        translated into a human-readable error_occurred signal instead
+        of propagating out of the thread (which would terminate it
+        silently, with nothing visible to the user at all).
+        """
         log_bridge = _LogBridge(self.log_message)
         risforge_logger = logging.getLogger("risforge")
         risforge_logger.addHandler(log_bridge)

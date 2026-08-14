@@ -14,3 +14,6 @@ venv/
 !tests/fixtures/*.ris
 !examples/*.ris
 .env
+.mypy_cache/
+.ruff_cache/
+.DS_Store

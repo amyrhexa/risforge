@@ -74,6 +74,7 @@ from risforge.cleaning import parse_ris_records
 
 TITLE_MATCH_THRESHOLD = 0.90
 CACHE_EXPIRE_DAYS = 7
+REQUEST_TIMEOUT_SECONDS = 10  # Applied to every provider HTTP call; retries/backoff are separate.
 
 logger = logging.getLogger(__name__)
 
@@ -155,9 +156,7 @@ class RisEnricher:
         }
         self.failed_records: list[dict[str, Any]] = []
         self.session = session or _build_default_session(str(cache_name))
-        self.session.headers.update(
-            {"User-Agent": f"risforge/1.0 (mailto:{self.email})"}
-        )
+        self.session.headers.update({"User-Agent": f"risforge/1.0 (mailto:{self.email})"})
 
     # --- Core identification -------------------------------------------------
 
@@ -191,7 +190,7 @@ class RisEnricher:
             f"&select=DOI,title&rows=3&mailto={self.email}"
         )
         try:
-            response = self.session.get(url, timeout=10)
+            response = self.session.get(url, timeout=REQUEST_TIMEOUT_SECONDS)
             self.stats["api_calls"]["crossref"] += 1
 
             if response.status_code == 200:
@@ -216,7 +215,7 @@ class RisEnricher:
         """Fetch authoritative bibliographic metadata from Crossref."""
         url = f"https://api.crossref.org/works/{quote(doi)}?mailto={self.email}"
         try:
-            response = self.session.get(url, timeout=10)
+            response = self.session.get(url, timeout=REQUEST_TIMEOUT_SECONDS)
             self.stats["api_calls"]["crossref"] += 1
 
             if response.status_code == 200:
@@ -273,15 +272,15 @@ class RisEnricher:
         """Fetch open-access status and subject concepts from OpenAlex."""
         url = f"https://api.openalex.org/works/doi:{quote(doi)}?mailto={self.email}"
         try:
-            response = self.session.get(url, timeout=10)
+            response = self.session.get(url, timeout=REQUEST_TIMEOUT_SECONDS)
             self.stats["api_calls"]["openalex"] += 1
 
             if response.status_code == 200:
                 payload = response.json()
                 concepts = [
-                    c.get("display_name")
-                    for c in payload.get("concepts", [])
-                    if c.get("level", 99) <= 1 and c.get("display_name")
+                    concept.get("display_name")
+                    for concept in payload.get("concepts", [])
+                    if concept.get("level", 99) <= 1 and concept.get("display_name")
                 ]
                 oa_url = payload.get("open_access", {}).get("oa_url")
                 return {
@@ -302,7 +301,7 @@ class RisEnricher:
             f"?fields=abstract,referenceCount,citationCount"
         )
         try:
-            response = self.session.get(url, timeout=10)
+            response = self.session.get(url, timeout=REQUEST_TIMEOUT_SECONDS)
             self.stats["api_calls"]["semanticscholar"] += 1
 
             if response.status_code == 200:
@@ -318,7 +317,7 @@ class RisEnricher:
         """Fetch the best open-access PDF location from Unpaywall."""
         url = f"https://api.unpaywall.org/v2/{quote(doi)}?email={self.email}"
         try:
-            response = self.session.get(url, timeout=10)
+            response = self.session.get(url, timeout=REQUEST_TIMEOUT_SECONDS)
             self.stats["api_calls"]["unpaywall"] += 1
 
             if response.status_code == 200:

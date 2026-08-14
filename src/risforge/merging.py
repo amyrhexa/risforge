@@ -106,9 +106,7 @@ def merge_ris_files(
                 len(errors),
                 path,
             )
-        all_errors.extend(
-            (path, block_number, message) for block_number, message in errors
-        )
+        all_errors.extend((path, block_number, message) for block_number, message in errors)
         all_records.extend(records)
         logger.info("%s: %d record(s) parsed.", path, len(records))
 

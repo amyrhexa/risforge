@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from typing import Any
 
 import rispy
@@ -56,9 +55,7 @@ OPENALEX_PAYLOAD = {
     "open_access": {"oa_url": "https://example.org/paper.pdf"},
 }
 SEMANTIC_SCHOLAR_PAYLOAD = {"abstract": "An abstract from Semantic Scholar."}
-UNPAYWALL_PAYLOAD = {
-    "best_oa_location": {"url_for_pdf": "https://example.org/oa-version.pdf"}
-}
+UNPAYWALL_PAYLOAD = {"best_oa_location": {"url_for_pdf": "https://example.org/oa-version.pdf"}}
 
 
 def _make_enricher() -> tuple[RisEnricher, _MockSession]:

@@ -94,6 +94,12 @@ class ResultsPanel(QWidget):
         final_ris_path: Path | None,
         fail_report_path: Path | None,
     ) -> None:
+        """Populate the summary and wire up the action buttons to real, existing files.
+
+        A path is only offered to "Open ..." if it actually exists on
+        disk -- e.g. no failure-report button when nothing failed, so
+        the buttons can't lead to a broken/missing-file open attempt.
+        """
         for key, label in self._value_labels.items():
             value = summary.get(key)
             label.setText(f"{value:,}" if isinstance(value, int) else "\u2014")
@@ -107,7 +113,9 @@ class ResultsPanel(QWidget):
             self._summary_form.setRowVisible(row, bool(skipped))
 
         self._output_dir = output_dir
-        self._final_ris_path = final_ris_path if final_ris_path and final_ris_path.exists() else None
+        self._final_ris_path = (
+            final_ris_path if final_ris_path and final_ris_path.exists() else None
+        )
         self._fail_report_path = (
             fail_report_path if fail_report_path and fail_report_path.exists() else None
         )

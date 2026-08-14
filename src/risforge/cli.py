@@ -48,9 +48,7 @@ def _configure_logging(verbose: bool) -> None:
 
 
 def _add_common_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "-v", "--verbose", action="store_true", help="Enable debug-level logging."
-    )
+    parser.add_argument("-v", "--verbose", action="store_true", help="Enable debug-level logging.")
 
 
 def _cmd_merge(args: argparse.Namespace) -> int:
@@ -188,9 +186,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common_args(merge_parser)
     merge_parser.set_defaults(func=_cmd_merge)
 
-    clean_parser = subparsers.add_parser(
-        "clean", help="Deduplicate and normalize a RIS file."
-    )
+    clean_parser = subparsers.add_parser("clean", help="Deduplicate and normalize a RIS file.")
     clean_parser.add_argument("input", help="Input RIS file path.")
     clean_parser.add_argument("output", help="Output cleaned RIS file path.")
     clean_parser.add_argument(

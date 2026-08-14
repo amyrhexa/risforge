@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox,
     QGroupBox,
@@ -201,9 +200,16 @@ class MainWindow(QMainWindow):
                 if input_count > 1
                 else "Deduplicates and enriches your input file."
             ),
-            OperationMode.MERGE: "Combines every input file's records into one file. Does not deduplicate or enrich.",
-            OperationMode.CLEAN: "Deduplicates a single RIS file. Requires exactly one input file.",
-            OperationMode.ENRICH: "Fills in missing metadata for a single, already-clean RIS file. Requires exactly one input file.",
+            OperationMode.MERGE: (
+                "Combines every input file's records into one file. Does not deduplicate or enrich."
+            ),
+            OperationMode.CLEAN: (
+                "Deduplicates a single RIS file. Requires exactly one input file."
+            ),
+            OperationMode.ENRICH: (
+                "Fills in missing metadata for a single, already-clean RIS file. "
+                "Requires exactly one input file."
+            ),
         }
         self.mode_hint_label.setText(hints[mode])
 
@@ -238,15 +244,17 @@ class MainWindow(QMainWindow):
         input_paths = self.input_panel.model.paths()
 
         if not input_paths:
-            QMessageBox.warning(self, "No input files", "Add at least one .ris file before starting.")
+            QMessageBox.warning(
+                self, "No input files", "Add at least one .ris file before starting."
+            )
             return None
 
         if mode is OperationMode.CLEAN and len(input_paths) != 1:
             QMessageBox.warning(
                 self,
                 "Too many input files",
-                "\"Clean only\" works on exactly one file. Either remove the extra files, "
-                "or use \"Merge only\" first to combine them into one.",
+                '"Clean only" works on exactly one file. Either remove the extra files, '
+                'or use "Merge only" first to combine them into one.',
             )
             return None
 
@@ -254,7 +262,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self,
                 "Too many input files",
-                "\"Enrich only\" works on exactly one file. Remove the extra files first.",
+                '"Enrich only" works on exactly one file. Remove the extra files first.',
             )
             return None
 
@@ -280,11 +288,15 @@ class MainWindow(QMainWindow):
             )
             return None
 
-        result_name = self.output_panel.final_name_edit.text().strip() or _DEFAULT_NAME_BY_MODE[mode]
+        result_name = (
+            self.output_panel.final_name_edit.text().strip() or _DEFAULT_NAME_BY_MODE[mode]
+        )
         result_path = output_dir / result_name
         merge_path = output_dir / "merged.ris"
         dedup_path = output_dir / "clean.ris"
-        fail_report_path = _resolve_relative_to(self.enrichment_panel.fail_report_name(), output_dir)
+        fail_report_path = _resolve_relative_to(
+            self.enrichment_panel.fail_report_name(), output_dir
+        )
 
         outputs_to_check = {result_path}
         if mode is OperationMode.PIPELINE:

@@ -35,7 +35,7 @@ def default_output_dir() -> Path:
 
 
 class OutputConfigPanel(QGroupBox):
-    """"Output" group box: destination directory, final filename, optional intermediates."""
+    """ "Output" group box: destination directory, final filename, optional intermediates."""
 
     changed = Signal()
 

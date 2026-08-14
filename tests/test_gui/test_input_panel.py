@@ -23,6 +23,25 @@ class TestAddFiles:
         # sample.ris (bundled fixture) has 5 records.
         qtbot.waitUntil(lambda: panel.model.total_known_records() == 5, timeout=5000)
 
+    def test_non_utf8_file_reports_an_error_instead_of_hanging(self, qtbot, tmp_path) -> None:
+        """Regression test: RecordCounter.run() must catch ValueError too.
+
+        parse_ris_records() raises RisParsingError (a ValueError
+        subclass) for a file it can't decode as text. Before this fix,
+        that would raise uncaught out of the QThreadPool worker, and
+        the row would stay stuck at "Counting..." forever with no
+        visible error -- catching only OSError missed it.
+        """
+        bad_path = tmp_path / "bad_encoding.ris"
+        bad_path.write_bytes(b"TY  - JOUR\nTI  - Bad \xff\xfe byte sequence\nER  - \n")
+
+        panel = InputPanel()
+        qtbot.addWidget(panel)
+        panel.add_dropped_paths([bad_path])
+
+        row = panel.model.index(0, 2)
+        qtbot.waitUntil(lambda: row.data() == "Error", timeout=5000)
+
     def test_files_changed_signal_fires_on_add(self, qtbot, one_ris_file) -> None:
         panel = InputPanel()
         qtbot.addWidget(panel)

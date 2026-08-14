@@ -60,9 +60,7 @@ class TestBuildParser:
 
     def test_enrich_requires_email(self) -> None:
         parser = build_parser()
-        args = parser.parse_args(
-            ["enrich", "in.ris", "out.ris", "--email", "you@example.com"]
-        )
+        args = parser.parse_args(["enrich", "in.ris", "out.ris", "--email", "you@example.com"])
         assert args.email == "you@example.com"
 
     def test_pipeline_defaults_are_none(self) -> None:
@@ -96,9 +94,7 @@ class TestBuildParser:
 
     def test_merge_subcommand_parses_inputs_and_trailing_output(self) -> None:
         parser = build_parser()
-        args = parser.parse_args(
-            ["merge", "scopus.ris", "pubmed.ris", "wos.ris", "merged.ris"]
-        )
+        args = parser.parse_args(["merge", "scopus.ris", "pubmed.ris", "wos.ris", "merged.ris"])
         assert args.command == "merge"
         assert args.inputs == ["scopus.ris", "pubmed.ris", "wos.ris"]
         assert args.output == "merged.ris"
@@ -167,9 +163,7 @@ class TestMergeCommandExecution:
 
 
 class TestPipelineCommandExecution:
-    def test_single_input_pipeline_runs(
-        self, sample_ris_path, mock_enrichment, tmp_path
-    ) -> None:
+    def test_single_input_pipeline_runs(self, sample_ris_path, mock_enrichment, tmp_path) -> None:
         parser = build_parser()
         dedup_path = tmp_path / "clean.ris"
         enriched_path = tmp_path / "enriched.ris"
