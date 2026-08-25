@@ -90,7 +90,6 @@ class TestMultiInputPipeline:
 
         dedup_path = tmp_path / "clean.ris"
         enriched_path = tmp_path / "enriched.ris"
-
         risforge(
             input_paths=multi_source_paths,
             dedup_path=dedup_path,
@@ -98,10 +97,11 @@ class TestMultiInputPipeline:
             email="test@example.com",
         )
 
-        cleaned_records = list(rispy.load(open(dedup_path, encoding="utf-8")))
+        with open(dedup_path, encoding="utf-8") as f:
+            cleaned_records = list(rispy.load(f))
+
         shared_paper = next(r for r in cleaned_records if "Tractography" in (r.get("title") or ""))
-        # abstract came from pubmed.ris, keywords came from wos.ris --
-        # merge_cluster() is what combines them into the one surviving record.
+
         assert shared_paper["abstract"] == (
             "Second copy of the same paper, carries an abstract the others lack."
         )
@@ -118,7 +118,6 @@ class TestMultiInputPipeline:
 
         dedup_path = tmp_path / "clean.ris"
         enriched_path = tmp_path / "enriched.ris"
-
         risforge(
             input_paths=multi_source_paths,
             dedup_path=dedup_path,
@@ -126,12 +125,11 @@ class TestMultiInputPipeline:
             email="test@example.com",
         )
 
-        enriched_records = list(rispy.load(open(enriched_path, encoding="utf-8")))
+        with open(enriched_path, encoding="utf-8") as f:
+            enriched_records = list(rispy.load(f))
+
         shared_paper = next(r for r in enriched_records if "Tractography" in (r.get("title") or ""))
-        # Kept from the original cleaned record, not overwritten by the
-        # mocked Crossref payload's different title/journal:
         assert shared_paper["title"] == "Deep Learning for Diffusion MRI Tractography"
-        # Filled in because it was missing after cleaning:
         assert shared_paper["abstract"] == (
             "Second copy of the same paper, carries an abstract the others lack."
         )

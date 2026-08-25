@@ -1,387 +1,324 @@
-"""Main application window.
-
-Owns the three-screen flow (setup -> progress -> results) and is the
-only place that constructs a :class:`~risforge_gui.worker.PipelineWorker`
-and calls into the ``risforge`` API (indirectly, via the worker).
-Every widget update happens in slots connected to the worker's
-signals -- nothing here touches a widget from a non-GUI thread.
-"""
+"""Main application window."""
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QComboBox,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QMainWindow,
     QMessageBox,
     QPushButton,
-    QScrollArea,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
-import risforge as risforge_core
 from risforge_gui.dialogs import confirm_overwrite, show_error_dialog
-from risforge_gui.theme import Theme, apply_theme
-from risforge_gui.widgets.config_panel import EnrichmentConfigPanel
-from risforge_gui.widgets.input_panel import InputPanel
-from risforge_gui.widgets.output_panel import OutputConfigPanel
-from risforge_gui.widgets.progress_panel import ProgressPanel
-from risforge_gui.widgets.results_panel import ResultsPanel
+from risforge_gui.widgets import (
+    EnrichmentConfigPanel,
+    InputPanel,
+    OutputConfigPanel,
+    ProgressPanel,
+    ResultsPanel,
+)
 from risforge_gui.worker import OperationMode, PipelineConfig, PipelineWorker
 
-_MODE_ITEMS = [
-    ("Full Pipeline (recommended)", OperationMode.PIPELINE),
-    ("Merge only", OperationMode.MERGE),
-    ("Clean only", OperationMode.CLEAN),
-    ("Enrich only", OperationMode.ENRICH),
-]
+logger = logging.getLogger(__name__)
 
-_RESULT_LABEL_BY_MODE = {
-    OperationMode.PIPELINE: "Final file name",
-    OperationMode.MERGE: "Merged file name",
-    OperationMode.CLEAN: "Cleaned file name",
-    OperationMode.ENRICH: "Enriched file name",
-}
-
-_DEFAULT_NAME_BY_MODE = {
-    OperationMode.PIPELINE: "enriched.ris",
-    OperationMode.MERGE: "merged.ris",
-    OperationMode.CLEAN: "clean.ris",
-    OperationMode.ENRICH: "enriched.ris",
-}
-
-
-def _resolve_relative_to(text: str, base: Path) -> Path:
-    """A bare filename is relative to the output folder, not the process cwd."""
-    path = Path(text)
-    return path if path.is_absolute() else base / path
+_ENRICHING_MODES = (OperationMode.PIPELINE, OperationMode.ENRICH)
 
 
 class MainWindow(QMainWindow):
-    def __init__(self) -> None:
-        super().__init__()
-        self.setWindowTitle("risforge")
+    """Primary RisForge GUI window."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+
+        self.setWindowTitle("RisForge - RIS Deduplication & Enrichment")
+        self.resize(900, 720)
+
         self.worker: PipelineWorker | None = None
-        self._last_config: PipelineConfig | None = None
+        self._running = False
 
-        central = QWidget()
-        self.setCentralWidget(central)
-        root_layout = QVBoxLayout(central)
-        root_layout.addWidget(self._build_header())
+        self._current_mode = OperationMode.PIPELINE
+        self._current_config: PipelineConfig | None = None
+        self._current_final_path: Path | None = None
+        self._current_fail_report: Path | None = None
+        self._latest_stats: dict[str, object] = {}
 
-        self.stack = QStackedWidget()
-        root_layout.addWidget(self.stack, stretch=1)
-
-        self.setup_page = self._build_setup_page()
+        self.input_panel = InputPanel()
+        self.config_panel = EnrichmentConfigPanel()
+        self.output_panel = OutputConfigPanel()
         self.progress_panel = ProgressPanel()
         self.results_panel = ResultsPanel()
 
+        self.setup_page = self._build_setup_page()
+
+        self.stack = QStackedWidget()
         self.stack.addWidget(self.setup_page)
         self.stack.addWidget(self.progress_panel)
         self.stack.addWidget(self.results_panel)
+        self.setCentralWidget(self.stack)
 
-        self.results_panel.start_new_project.connect(self._on_start_new_project)
+        self.input_panel.files_changed.connect(self._update_start_enabled)
+        self.results_panel.start_new_project.connect(self._start_new_project)
 
-        self._on_mode_changed()  # apply initial visibility rules
-
-    # --- Header -----------------------------------------------------------------
-
-    def _build_header(self) -> QWidget:
-        header = QWidget()
-        layout = QHBoxLayout(header)
-
-        text_column = QVBoxLayout()
-        title = QLabel("risforge")
-        title.setObjectName("HeaderTitle")
-        subtitle = QLabel("Clean, deduplicate, and enrich RIS bibliographic files.")
-        subtitle.setObjectName("HeaderSubtitle")
-        version = QLabel(f"Version {risforge_core.__version__}")
-        version.setObjectName("VersionLabel")
-        text_column.addWidget(title)
-        text_column.addWidget(subtitle)
-        text_column.addWidget(version)
-        layout.addLayout(text_column)
-        layout.addStretch(1)
-
-        theme_label = QLabel("Theme")
-        theme_label.setObjectName("MutedLabel")
-        self.theme_combo = QComboBox()
-        self.theme_combo.setAccessibleName("Theme selector")
-        self.theme_combo.addItems(["System", "Light", "Dark"])
-        self.theme_combo.currentTextChanged.connect(self._on_theme_changed)
-        theme_label.setBuddy(self.theme_combo)
-        layout.addWidget(theme_label)
-        layout.addWidget(self.theme_combo)
-
-        return header
-
-    def _on_theme_changed(self, text: str) -> None:
-        from PySide6.QtWidgets import QApplication
-
-        theme = {"System": Theme.SYSTEM, "Light": Theme.LIGHT, "Dark": Theme.DARK}[text]
-        app = QApplication.instance()
-        if app is not None:
-            apply_theme(app, theme)
-
-    # --- Setup page ---------------------------------------------------------------
+        self._on_mode_changed()
+        self._update_start_enabled()
 
     def _build_setup_page(self) -> QWidget:
-        scroll = QScrollArea()
-        scroll.setObjectName("SetupPage")
-        scroll.setWidgetResizable(True)
+        page = QWidget()
+        layout = QVBoxLayout(page)
 
-        content = QWidget()
-        layout = QVBoxLayout(content)
+        title = QLabel("RisForge")
+        title.setObjectName("HeaderTitle")
 
-        self.input_panel = InputPanel()
-        self.input_panel.files_changed.connect(self._on_mode_changed)
+        subtitle = QLabel("Merge, clean, deduplicate, and enrich RIS bibliography exports.")
+        subtitle.setObjectName("HeaderSubtitle")
+
+        layout.addWidget(title)
+        layout.addWidget(subtitle)
         layout.addWidget(self.input_panel)
 
-        mode_box = QGroupBox("Operation")
-        mode_layout = QHBoxLayout(mode_box)
-        mode_label = QLabel("What should risforge do?")
-        self.mode_combo = QComboBox()
-        self.mode_combo.setAccessibleName("Operation mode")
-        for label, _mode in _MODE_ITEMS:
-            self.mode_combo.addItem(label)
-        self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
-        mode_label.setBuddy(self.mode_combo)
-        mode_layout.addWidget(mode_label)
-        mode_layout.addWidget(self.mode_combo, stretch=1)
-        layout.addWidget(mode_box)
+        operation_row = QHBoxLayout()
+        operation_label = QLabel("Operation")
 
-        self.mode_hint_label = QLabel("")
-        self.mode_hint_label.setObjectName("HelperText")
-        self.mode_hint_label.setWordWrap(True)
-        layout.addWidget(self.mode_hint_label)
+        self.operation_combo = QComboBox()
+        self.operation_combo.addItem("Full Pipeline", OperationMode.PIPELINE)
+        self.operation_combo.addItem("Merge only", OperationMode.MERGE)
+        self.operation_combo.addItem("Clean only", OperationMode.CLEAN)
+        self.operation_combo.addItem("Enrich only", OperationMode.ENRICH)
+        self.operation_combo.currentIndexChanged.connect(self._on_mode_changed)
 
-        self.enrichment_panel = EnrichmentConfigPanel()
-        layout.addWidget(self.enrichment_panel)
+        operation_row.addWidget(operation_label)
+        operation_row.addWidget(self.operation_combo, stretch=1)
+        layout.addLayout(operation_row)
 
-        self.output_panel = OutputConfigPanel()
+        layout.addWidget(self.config_panel)
         layout.addWidget(self.output_panel)
 
+        controls = QHBoxLayout()
         self.start_button = QPushButton("Start")
         self.start_button.setObjectName("PrimaryButton")
-        self.start_button.setAccessibleName("Start processing")
-        self.start_button.clicked.connect(self._on_start_clicked)
-        start_row = QHBoxLayout()
-        start_row.addStretch(1)
-        start_row.addWidget(self.start_button)
-        layout.addLayout(start_row)
+        self.start_button.clicked.connect(self._start)
+
+        controls.addStretch(1)
+        controls.addWidget(self.start_button)
+        layout.addLayout(controls)
         layout.addStretch(1)
 
-        scroll.setWidget(content)
-        return scroll
+        return page
 
-    def _current_mode(self) -> OperationMode:
-        return _MODE_ITEMS[self.mode_combo.currentIndex()][1]
+    @property
+    def _mode(self) -> OperationMode:
+        return self.operation_combo.currentData()
 
     def _on_mode_changed(self) -> None:
-        mode = self._current_mode()
-        input_count = len(self.input_panel.model.paths())
+        mode = self._mode
+        self.config_panel.setVisible(mode in _ENRICHING_MODES)
+        self._update_start_enabled()
 
-        needs_enrichment_settings = mode in (OperationMode.PIPELINE, OperationMode.ENRICH)
-        self.enrichment_panel.setVisible(needs_enrichment_settings)
-        self.output_panel.keep_merged_check.setVisible(mode is OperationMode.PIPELINE)
-        self.output_panel.keep_cleaned_check.setVisible(mode is OperationMode.PIPELINE)
-        self.output_panel.final_name_edit.setPlaceholderText(_DEFAULT_NAME_BY_MODE[mode])
+    def _update_start_enabled(self) -> None:
+        has_files = self.input_panel.model.rowCount() > 0
+        self.start_button.setEnabled(has_files and not self._running)
 
-        hints = {
-            OperationMode.PIPELINE: (
-                "Merges multiple files automatically, then deduplicates and enriches. "
-                "A single input file skips the merge step."
-                if input_count > 1
-                else "Deduplicates and enriches your input file."
-            ),
-            OperationMode.MERGE: (
-                "Combines every input file's records into one file. Does not deduplicate or enrich."
-            ),
-            OperationMode.CLEAN: (
-                "Deduplicates a single RIS file. Requires exactly one input file."
-            ),
-            OperationMode.ENRICH: (
-                "Fills in missing metadata for a single, already-clean RIS file. "
-                "Requires exactly one input file."
-            ),
-        }
-        self.mode_hint_label.setText(hints[mode])
-
-    # --- Start / validation ---------------------------------------------------------
-
-    def _on_start_clicked(self) -> None:
-        config = self._gather_config()
-        if config is None:
+    def _start(self) -> None:
+        if self._running:
             return
-        self._last_config = config
 
-        stages = self._stages_for_mode(config.mode, len(config.input_paths))
-        self.progress_panel.reset(stages)
-        self.stack.setCurrentWidget(self.progress_panel)
+        paths = self.input_panel.model.paths()
+        if not paths:
+            return
 
-        self.worker = PipelineWorker(config)
-        self.worker.stage_changed.connect(self.progress_panel.set_stage_status)
-        self.worker.enrichment_progress.connect(self.progress_panel.set_enrichment_progress)
-        self.worker.log_message.connect(self.progress_panel.append_log)
-        self.worker.stats_changed.connect(self.progress_panel.update_stats)
-        self.worker.error_occurred.connect(self._on_worker_error)
-        self.worker.finished_ok.connect(self._on_worker_finished)
-        self.worker.start()
+        mode = self._mode
 
-    def _stages_for_mode(self, mode: OperationMode, input_count: int) -> list[str]:
-        if mode is OperationMode.PIPELINE:
-            return (["merge"] if input_count > 1 else []) + ["clean", "enrich"]
-        return [mode.value]
+        email = ""
+        if mode in _ENRICHING_MODES:
+            email = self.config_panel.email()
+            if "@" not in email:
+                show_error_dialog(
+                    self,
+                    "Contact email required",
+                    "Enter a valid contact email for Crossref/OpenAlex/Unpaywall "
+                    "polite-pool access.",
+                )
+                return
 
-    def _gather_config(self) -> PipelineConfig | None:
-        mode = self._current_mode()
-        input_paths = self.input_panel.model.paths()
-
-        if not input_paths:
-            QMessageBox.warning(
-                self, "No input files", "Add at least one .ris file before starting."
-            )
-            return None
-
-        if mode is OperationMode.CLEAN and len(input_paths) != 1:
-            QMessageBox.warning(
+        if mode in (OperationMode.CLEAN, OperationMode.ENRICH) and len(paths) != 1:
+            show_error_dialog(
                 self,
-                "Too many input files",
-                '"Clean only" works on exactly one file. Either remove the extra files, '
-                'or use "Merge only" first to combine them into one.',
+                "One input file required",
+                "Standalone Clean and Enrich operate on exactly one RIS file. "
+                "Use Full Pipeline or Merge for multiple files.",
             )
-            return None
-
-        if mode is OperationMode.ENRICH and len(input_paths) != 1:
-            QMessageBox.warning(
-                self,
-                "Too many input files",
-                '"Enrich only" works on exactly one file. Remove the extra files first.',
-            )
-            return None
-
-        needs_email = mode in (OperationMode.PIPELINE, OperationMode.ENRICH)
-        email = self.enrichment_panel.email()
-        if needs_email and "@" not in email:
-            QMessageBox.warning(
-                self,
-                "Contact email required",
-                "Enrichment queries scholarly APIs that require a contact email address. "
-                "Please enter one in Enrichment settings.",
-            )
-            return None
+            return
 
         output_dir = self.output_panel.output_dir()
+
         try:
             output_dir.mkdir(parents=True, exist_ok=True)
         except OSError as error:
             show_error_dialog(
                 self,
-                title="Could not create the output folder",
-                message=f"{output_dir}\n\n{error}",
+                "Cannot create output folder",
+                str(error),
+                details=repr(error),
+                affected_file=str(output_dir),
             )
-            return None
+            return
 
-        result_name = (
-            self.output_panel.final_name_edit.text().strip() or _DEFAULT_NAME_BY_MODE[mode]
+        final_path = self.output_panel.final_ris_path()
+        fail_report_path = output_dir / self.config_panel.fail_report_name()
+
+        config = PipelineConfig(
+            mode=mode,
+            input_paths=paths,
+            email=email,
+            cache_path=self.config_panel.cache_path(),
+            request_delay_seconds=self.config_panel.request_delay_seconds(),
+            fail_report_path=fail_report_path,
         )
-        result_path = output_dir / result_name
-        merge_path = output_dir / "merged.ris"
-        dedup_path = output_dir / "clean.ris"
-        fail_report_path = _resolve_relative_to(
-            self.enrichment_panel.fail_report_name(), output_dir
-        )
 
-        outputs_to_check = {result_path}
-        if mode is OperationMode.PIPELINE:
-            if len(input_paths) > 1 and self.output_panel.keep_merged():
-                outputs_to_check.add(merge_path)
-            if self.output_panel.keep_cleaned():
-                outputs_to_check.add(dedup_path)
-
-        for path in sorted(outputs_to_check):
-            if path.exists() and not confirm_overwrite(self, path):
-                return None
-
-        config = PipelineConfig(mode=mode, input_paths=input_paths)
-        config.email = email
-        config.cache_path = self.enrichment_panel.cache_path()
-        config.request_delay_seconds = self.enrichment_panel.request_delay_seconds()
-        config.fail_report_path = fail_report_path
+        overwrite_paths = [final_path]
 
         if mode is OperationMode.MERGE:
-            config.merge_output_path = result_path
+            config.merge_output_path = final_path
         elif mode is OperationMode.CLEAN:
-            config.dedup_output_path = result_path
+            config.dedup_output_path = final_path
         elif mode is OperationMode.ENRICH:
-            config.enriched_output_path = result_path
-        else:  # PIPELINE
-            config.merge_output_path = merge_path
-            config.dedup_output_path = dedup_path
-            config.enriched_output_path = result_path
+            config.enriched_output_path = final_path
+            overwrite_paths.append(fail_report_path)
+        else:
+            config.enriched_output_path = final_path
+            config.dedup_output_path = self.output_panel.cleaned_path()
+            overwrite_paths.append(config.dedup_output_path)
 
-        return config
+            if len(paths) > 1:
+                config.merge_output_path = self.output_panel.merged_path()
+                overwrite_paths.append(config.merge_output_path)
 
-    # --- Worker signal handlers --------------------------------------------------------
+            overwrite_paths.append(fail_report_path)
 
-    def _on_worker_error(self, title: str, message: str, details: str, affected_file: str) -> None:
-        show_error_dialog(self, title, message, details, affected_file)
-        self.stack.setCurrentWidget(self.setup_page)
+        if not self._confirm_overwrites(overwrite_paths):
+            return
 
-    def _on_worker_finished(self, result: object) -> None:
-        config = self._last_config
-        assert config is not None
-        summary, final_path, fail_report_path = self._summarize(config, result)
-        output_dir = final_path.parent if final_path else self.output_panel.output_dir()
-        self.results_panel.set_results(summary, output_dir, final_path, fail_report_path)
+        self._current_mode = mode
+        self._current_config = config
+        self._current_final_path = final_path
+        self._current_fail_report = fail_report_path if mode in _ENRICHING_MODES else None
+
+        self._latest_stats = {"input_files": len(paths)}
+        total_records = self.input_panel.model.total_known_records()
+
+        if total_records is not None:
+            self._latest_stats["input_records"] = total_records
+
+        self.progress_panel.reset(self._stages_for(mode, len(paths)))
+        self.progress_panel.update_stats(self._latest_stats)
+        self.stack.setCurrentWidget(self.progress_panel)
+
+        self._set_running(True)
+
+        self.worker = PipelineWorker(config, self)
+        self.worker.stage_changed.connect(self.progress_panel.set_stage_status)
+        self.worker.enrichment_progress.connect(self.progress_panel.set_enrichment_progress)
+        self.worker.log_message.connect(self.progress_panel.append_log)
+        self.worker.stats_changed.connect(self._on_stats)
+        self.worker.finished_ok.connect(self._on_finished)
+        self.worker.error_occurred.connect(self._on_error)
+        self.worker.finished.connect(self._on_thread_finished)
+        self.worker.start()
+
+    def _confirm_overwrites(self, paths: list[Path]) -> bool:
+        seen: set[Path] = set()
+
+        for path in paths:
+            if path in seen:
+                continue
+
+            seen.add(path)
+
+            if path.exists() and not confirm_overwrite(self, path):
+                return False
+
+        return True
+
+    @staticmethod
+    def _stages_for(mode: OperationMode, input_count: int) -> list[str]:
+        if mode is OperationMode.MERGE:
+            return ["merge"]
+
+        if mode is OperationMode.CLEAN:
+            return ["clean"]
+
+        if mode is OperationMode.ENRICH:
+            return ["enrich"]
+
+        if input_count > 1:
+            return ["merge", "clean", "enrich"]
+
+        return ["clean", "enrich"]
+
+    def _set_running(self, running: bool) -> None:
+        self._running = running
+        self._update_start_enabled()
+
+    def _on_stats(self, stats: dict) -> None:
+        self._latest_stats.update(stats)
+        self.progress_panel.update_stats(stats)
+
+    def _on_finished(self, _result: object) -> None:
+        self._cleanup_intermediate_files()
+
+        summary = dict(self._latest_stats)
+
+        self.results_panel.set_results(
+            summary,
+            self.output_panel.output_dir(),
+            self._current_final_path,
+            self._current_fail_report,
+        )
+
         self.stack.setCurrentWidget(self.results_panel)
 
-    def _summarize(
-        self, config: PipelineConfig, result: object
-    ) -> tuple[dict, Path | None, Path | None]:
-        input_records = self.input_panel.model.total_known_records()
+    def _on_error(self, title: str, message: str, details: str, affected_file: str) -> None:
+        self.stack.setCurrentWidget(self.setup_page)
+        show_error_dialog(self, title, message, details, affected_file)
 
-        if config.mode is OperationMode.MERGE:
-            summary = {
-                "input_files": result.input_file_count,  # type: ignore[attr-defined]
-                "input_records": input_records,
-            }
-            return summary, config.merge_output_path, None
+    def _on_thread_finished(self) -> None:
+        self.worker = None
+        self._set_running(False)
 
-        if config.mode is OperationMode.CLEAN:
-            records, _errors = result  # type: ignore[misc]
-            summary = {"input_records": input_records, "unique_records": len(records)}
-            return summary, config.dedup_output_path, None
+    def _cleanup_intermediate_files(self) -> None:
+        config = self._current_config
 
-        if config.mode is OperationMode.ENRICH:
-            stats = result  # type: ignore[assignment]
-            summary = {
-                "input_records": stats.get("processed", 0),  # type: ignore[union-attr]
-                "enriched_records": stats.get("enriched", 0),  # type: ignore[union-attr]
-                "failed_enrichment": stats.get("failed", 0),  # type: ignore[union-attr]
-                "skipped_malformed": stats.get("skipped_malformed", 0),  # type: ignore[union-attr]
-            }
-            return summary, config.enriched_output_path, config.fail_report_path
+        if config is None or config.mode is not OperationMode.PIPELINE:
+            return
 
-        # PIPELINE
-        summary = {
-            "input_files": result.input_file_count,  # type: ignore[attr-defined]
-            "input_records": input_records,
-            "unique_records": result.cleaned_record_count,  # type: ignore[attr-defined]
-            "enriched_records": result.enrichment_stats.get("enriched", 0),  # type: ignore[attr-defined]
-            "failed_enrichment": result.enrichment_stats.get("failed", 0),  # type: ignore[attr-defined]
-            "skipped_malformed": result.enrichment_stats.get("skipped_malformed", 0),  # type: ignore[attr-defined]
-        }
-        return summary, config.enriched_output_path, config.fail_report_path
+        if not self.output_panel.keep_merged() and config.merge_output_path is not None:
+            config.merge_output_path.unlink(missing_ok=True)
 
-    # --- Reset --------------------------------------------------------------------------
+        if not self.output_panel.keep_cleaned() and config.dedup_output_path is not None:
+            config.dedup_output_path.unlink(missing_ok=True)
 
-    def _on_start_new_project(self) -> None:
+    def _start_new_project(self) -> None:
         self.input_panel.clear_all()
         self.stack.setCurrentWidget(self.setup_page)
+        self._update_start_enabled()
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if self._running:
+            QMessageBox.warning(
+                self,
+                "Processing",
+                "RisForge is still processing. Wait for the run to finish before closing.",
+            )
+            event.ignore()
+            return
+
+        super().closeEvent(event)

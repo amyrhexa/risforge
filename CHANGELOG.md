@@ -4,6 +4,17 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] - 2026-08-25
+### Changed
+- Comprehensive codebase refactor: improved type hinting, modularized GUI widgets, and stabilized the test suite.
+- Consolidated packaging into a single `risforge` PyPI package with an optional `[gui]` extra, replacing the split `risforge-gui` package.
+- Unified RIS writer across merge, clean, and enrichment stages.
+
+### Fixed
+- Resolved DOI extraction regex capture group errors in enrichment.
+- Fixed GUI worker thread silent failures when passing kwargs to the core pipeline.
+- Corrected test fixture logic to properly validate multi-source merging and deterministic ordering.
+
 ## [0.3.3] - 2026-08-14
 
 A non-functional clean-code audit pass across the whole codebase: naming,

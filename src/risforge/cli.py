@@ -1,22 +1,4 @@
-"""Command-line interface for risforge.
-
-This is where the original scripts' "just run me directly" behavior
-now lives, generalized into subcommands so a single installed
-``risforge`` command replaces having three separate scripts each
-hardcoding its own paths:
-
-    risforge merge scopus.ris pubmed.ris wos.ris merged.ris
-    risforge clean input.ris output_clean.ris
-    risforge enrich input.ris output_enriched.ris --email you@example.com
-    risforge pipeline input.ris --email you@example.com
-    risforge pipeline scopus.ris pubmed.ris wos.ris --email you@example.com --output final.ris
-
-``merge`` only combines files (no dedup, no enrichment).
-``pipeline`` accepts one or more input files; with more than one, it
-merges them automatically before cleaning and enriching -- there's no
-need to run ``merge`` separately first unless you want the merged
-file itself.
-"""
+"""Command-line interface for risforge."""
 
 from __future__ import annotations
 
@@ -34,13 +16,6 @@ logger = logging.getLogger("risforge")
 
 
 def _configure_logging(verbose: bool) -> None:
-    """Configure logging for CLI usage only.
-
-    Library modules never do this themselves (see the module
-    docstrings in :mod:`risforge.cleaning` and
-    :mod:`risforge.enrichment`) -- only the CLI entry point, which is
-    the one context where it's actually risforge's call to make.
-    """
     logging.basicConfig(
         level=logging.DEBUG if verbose else logging.INFO,
         format="%(levelname)s: %(message)s",
@@ -48,7 +23,21 @@ def _configure_logging(verbose: bool) -> None:
 
 
 def _add_common_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("-v", "--verbose", action="store_true", help="Enable debug-level logging.")
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Enable debug-level logging.",
+    )
+
+
+def _default_sibling(input_path: str | Path, suffix: str) -> Path:
+    path = Path(input_path)
+    return path.with_name(f"{path.stem}{suffix}{path.suffix}")
+
+
+def _default_multi_output(inputs: list[str], filename: str) -> Path:
+    return Path(inputs[0]).parent / filename
 
 
 def _cmd_merge(args: argparse.Namespace) -> int:
@@ -67,6 +56,7 @@ def _cmd_merge(args: argparse.Namespace) -> int:
         result.input_file_count,
         result.output_path,
     )
+
     return 1 if result.errors and args.strict else 0
 
 
@@ -92,6 +82,9 @@ def _cmd_enrich(args: argparse.Namespace) -> int:
             output_path=args.output,
             fail_report_path=args.fail_report,
         )
+    except FileNotFoundError as error:
+        logger.error("%s", error)
+        return 1
     except (OSError, ValueError, RuntimeError) as error:
         logger.error("Enrichment failed: %s", error)
         return 1
@@ -106,11 +99,11 @@ def _cmd_pipeline(args: argparse.Namespace) -> int:
     if len(inputs) > 1:
         dedup_path = args.dedup_output or _default_multi_output(inputs, "clean.ris")
         enriched_path = args.output or _default_multi_output(inputs, "enriched.ris")
-        merge_path = args.merge_output  # None is fine -- risforge() applies its own default.
+        merge_path = args.merge_output
     else:
         dedup_path = args.dedup_output or _default_sibling(inputs[0], "_clean")
         enriched_path = args.output or _default_sibling(inputs[0], "_enriched")
-        merge_path = None  # Unused: a single input never triggers a merge step.
+        merge_path = None
 
     try:
         result = risforge(
@@ -120,6 +113,7 @@ def _cmd_pipeline(args: argparse.Namespace) -> int:
             email=args.email,
             merge_path=merge_path,
             fail_report_path=args.fail_report,
+            cache_name=args.cache_name,
         )
     except FileNotFoundError as error:
         logger.error("Input file missing: %s", error)
@@ -135,142 +129,74 @@ def _cmd_pipeline(args: argparse.Namespace) -> int:
             result.merged_record_count,
             result.merge_path,
         )
+
     logger.info(
         "Pipeline finished: %d cleaned records, %d/%d enriched.",
         result.cleaned_record_count,
         result.enrichment_stats.get("enriched", 0),
         result.enrichment_stats.get("processed", 0),
     )
+
     return 0
 
 
-def _default_sibling(input_path: str | Path, suffix: str) -> Path:
-    path = Path(input_path)
-    return path.with_name(f"{path.stem}{suffix}{path.suffix}")
-
-
-def _default_multi_output(inputs: list[str], filename: str) -> Path:
-    """Deterministic default output path when the pipeline has multiple inputs.
-
-    Deliberately does not derive from any single input's filename
-    (see :func:`risforge.pipeline._default_merge_path` for the same
-    reasoning) -- it places a fixed, descriptive filename next to the
-    first input file instead.
-    """
-    return Path(inputs[0]).parent / filename
-
-
 def build_parser() -> argparse.ArgumentParser:
-    """Build the top-level argument parser (exposed for testing/docs)."""
+    """Build the CLI argument parser."""
     parser = argparse.ArgumentParser(
         prog="risforge",
         description="Merge, clean, deduplicate, and enrich RIS bibliographic files.",
     )
+
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     merge_parser = subparsers.add_parser(
         "merge",
         help="Combine multiple RIS files into one. Does NOT deduplicate or enrich.",
     )
-    merge_parser.add_argument(
-        "inputs",
-        nargs="+",
-        help="Two or more input RIS file paths to combine (a single file is also accepted).",
-    )
-    merge_parser.add_argument("output", help="Output merged RIS file path.")
+    merge_parser.add_argument("inputs", nargs="+")
+    merge_parser.add_argument("output")
     merge_parser.add_argument(
         "--strict",
         action="store_true",
-        help="Exit with a non-zero status if any records failed to parse.",
+        help="Exit non-zero if any records failed to parse.",
     )
     _add_common_args(merge_parser)
     merge_parser.set_defaults(func=_cmd_merge)
 
     clean_parser = subparsers.add_parser("clean", help="Deduplicate and normalize a RIS file.")
-    clean_parser.add_argument("input", help="Input RIS file path.")
-    clean_parser.add_argument("output", help="Output cleaned RIS file path.")
+    clean_parser.add_argument("input")
+    clean_parser.add_argument("output")
     clean_parser.add_argument(
         "--strict",
         action="store_true",
-        help="Exit with a non-zero status if any records failed to parse.",
+        help="Exit non-zero if any records failed to parse.",
     )
     _add_common_args(clean_parser)
     clean_parser.set_defaults(func=_cmd_clean)
 
     enrich_parser = subparsers.add_parser(
-        "enrich", help="Enrich a RIS file with metadata from scholarly APIs."
+        "enrich",
+        help="Enrich a RIS file with metadata from scholarly APIs.",
     )
-    enrich_parser.add_argument("input", help="Input RIS file path.")
-    enrich_parser.add_argument("output", help="Output enriched RIS file path.")
-    enrich_parser.add_argument(
-        "--email",
-        required=True,
-        help="Contact email for Crossref/OpenAlex/Unpaywall polite-pool access.",
-    )
-    enrich_parser.add_argument(
-        "--fail-report",
-        dest="fail_report",
-        default="failed_records.json",
-        help="Where to write unresolved-DOI records (default: %(default)s).",
-    )
-    enrich_parser.add_argument(
-        "--cache-name",
-        dest="cache_name",
-        default=".api_cache",
-        help="Base filename for the on-disk HTTP response cache.",
-    )
+    enrich_parser.add_argument("input")
+    enrich_parser.add_argument("output")
+    enrich_parser.add_argument("--email", required=True)
+    enrich_parser.add_argument("--fail-report", default="failed_records.json")
+    enrich_parser.add_argument("--cache-name", default=".api_cache")
     _add_common_args(enrich_parser)
     enrich_parser.set_defaults(func=_cmd_enrich)
 
     pipeline_parser = subparsers.add_parser(
         "pipeline",
-        help="Run merge (if multiple inputs) then clean then enrich in one step.",
+        help="Run merge (if multiple inputs), clean, and enrich in one step.",
     )
-    pipeline_parser.add_argument(
-        "inputs",
-        nargs="+",
-        help=(
-            "One or more input RIS files. A single file skips merging; "
-            "two or more are merged automatically before deduplication."
-        ),
-    )
-    pipeline_parser.add_argument(
-        "--email",
-        required=True,
-        help="Contact email for Crossref/OpenAlex/Unpaywall polite-pool access.",
-    )
-    pipeline_parser.add_argument(
-        "--merge-output",
-        dest="merge_output",
-        default=None,
-        help=(
-            "Path for the intermediate merged file, used only when multiple "
-            "inputs are given (default: merged.ris next to the dedup output)."
-        ),
-    )
-    pipeline_parser.add_argument(
-        "--dedup-output",
-        dest="dedup_output",
-        default=None,
-        help=(
-            "Path for the intermediate cleaned file (default: <input>_clean.ris "
-            "for a single input, clean.ris next to the first input for multiple)."
-        ),
-    )
-    pipeline_parser.add_argument(
-        "--output",
-        default=None,
-        help=(
-            "Path for the final enriched file (default: <input>_enriched.ris "
-            "for a single input, enriched.ris next to the first input for multiple)."
-        ),
-    )
-    pipeline_parser.add_argument(
-        "--fail-report",
-        dest="fail_report",
-        default="failed_records.json",
-        help="Where to write unresolved-DOI records (default: %(default)s).",
-    )
+    pipeline_parser.add_argument("inputs", nargs="+")
+    pipeline_parser.add_argument("--email", required=True)
+    pipeline_parser.add_argument("--merge-output", default=None)
+    pipeline_parser.add_argument("--dedup-output", default=None)
+    pipeline_parser.add_argument("--output", default=None)
+    pipeline_parser.add_argument("--fail-report", default="failed_records.json")
+    pipeline_parser.add_argument("--cache-name", default=".api_cache")
     _add_common_args(pipeline_parser)
     pipeline_parser.set_defaults(func=_cmd_pipeline)
 
@@ -278,7 +204,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> None:
-    """CLI entry point (registered as the ``risforge`` console script)."""
+    """CLI entry point."""
     parser = build_parser()
     args = parser.parse_args(argv)
     _configure_logging(args.verbose)

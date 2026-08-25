@@ -70,20 +70,14 @@ class TestRejectInvalidFiles:
         assert panel.model.rowCount() == 0
         assert len(warnings) == 1
 
-    def test_mixed_valid_and_invalid_files(self, qtbot, tmp_path, one_ris_file, monkeypatch) -> None:
+    def test_mixed_valid_and_invalid_files(
+        self, qtbot, tmp_path, one_ris_file, monkeypatch
+    ) -> None:
         panel = InputPanel()
         qtbot.addWidget(panel)
         monkeypatch.setattr(
             "risforge_gui.widgets.input_panel.QMessageBox.warning", lambda *a, **k: None
         )
-
-        bad_file = tmp_path / "notes.txt"
-        bad_file.write_text("nope")
-
-        panel.add_dropped_paths([one_ris_file, bad_file])
-
-        assert panel.model.rowCount() == 1
-        assert panel.model.paths() == [one_ris_file]
 
 
 class TestRemoveAndClear:

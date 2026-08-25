@@ -1,4 +1,4 @@
-"""Results screen: completion summary and post-run actions."""
+"""Results panel."""
 
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 _SUMMARY_LABELS = {
     "input_files": "Input files",
     "input_records": "Input records",
+    "merged_records": "Merged records",
     "unique_records": "Unique records",
     "enriched_records": "Enriched records",
     "failed_enrichment": "Unresolved records",
@@ -28,13 +29,14 @@ _SUMMARY_LABELS = {
 
 
 class ResultsPanel(QWidget):
-    """Shown after a run finishes successfully."""
+    """Completion summary and post-run actions."""
 
     start_new_project = Signal()
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("ResultsPage")
+
         self._output_dir: Path | None = None
         self._final_ris_path: Path | None = None
         self._fail_report_path: Path | None = None
@@ -49,31 +51,29 @@ class ResultsPanel(QWidget):
         self._summary_form = QFormLayout(summary_box)
         self._value_labels: dict[str, QLabel] = {}
         self._summary_rows: dict[str, int] = {}
+
         for row, (key, label_text) in enumerate(_SUMMARY_LABELS.items()):
             value_label = QLabel("\u2014")
             self._value_labels[key] = value_label
             self._summary_rows[key] = row
             self._summary_form.addRow(QLabel(label_text), value_label)
+
         layout.addWidget(summary_box)
 
         actions = QHBoxLayout()
 
         self.open_folder_button = QPushButton("Open Output Folder")
-        self.open_folder_button.setAccessibleName("Open output folder")
         self.open_folder_button.clicked.connect(self._open_output_folder)
 
         self.open_file_button = QPushButton("Open Final RIS")
-        self.open_file_button.setAccessibleName("Open final RIS file")
         self.open_file_button.clicked.connect(self._open_final_file)
 
         self.view_failures_button = QPushButton("View Failure Report")
-        self.view_failures_button.setAccessibleName("View failure report")
         self.view_failures_button.clicked.connect(self._open_failure_report)
         self.view_failures_button.setEnabled(False)
 
         self.new_project_button = QPushButton("Start New Project")
         self.new_project_button.setObjectName("PrimaryButton")
-        self.new_project_button.setAccessibleName("Start a new project")
         self.new_project_button.clicked.connect(self.start_new_project.emit)
 
         for button in (
@@ -83,6 +83,7 @@ class ResultsPanel(QWidget):
             self.new_project_button,
         ):
             actions.addWidget(button)
+
         actions.addStretch(1)
         layout.addLayout(actions)
         layout.addStretch(1)
@@ -94,21 +95,14 @@ class ResultsPanel(QWidget):
         final_ris_path: Path | None,
         fail_report_path: Path | None,
     ) -> None:
-        """Populate the summary and wire up the action buttons to real, existing files.
-
-        A path is only offered to "Open ..." if it actually exists on
-        disk -- e.g. no failure-report button when nothing failed, so
-        the buttons can't lead to a broken/missing-file open attempt.
-        """
+        """Populate summary and enable only actions with real files."""
         for key, label in self._value_labels.items():
             value = summary.get(key)
             label.setText(f"{value:,}" if isinstance(value, int) else "\u2014")
 
-        # Keep the summary uncluttered for the common case: only show
-        # "Skipped (unreadable records)" when there's actually
-        # something to report, rather than a permanent "0" row.
         skipped = summary.get("skipped_malformed")
         row = self._summary_rows.get("skipped_malformed")
+
         if row is not None:
             self._summary_form.setRowVisible(row, bool(skipped))
 

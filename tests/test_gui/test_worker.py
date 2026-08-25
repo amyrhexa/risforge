@@ -86,7 +86,12 @@ class TestEnrichMode:
                 self.cache_name = cache_name
 
             def enrich_file(
-                self, input_path, output_path, fail_report_path, request_delay_seconds, progress_callback
+                self,
+                input_path,
+                output_path,
+                fail_report_path,
+                request_delay_seconds,
+                progress_callback,
             ):
                 Path(output_path).write_text("TY  - JOUR\nER  - \n", encoding="utf-8")
                 progress_callback(1, 2)
@@ -105,7 +110,9 @@ class TestEnrichMode:
         results = []
         progress_signal_calls = []
         worker.finished_ok.connect(lambda r: results.append(r))
-        worker.enrichment_progress.connect(lambda done, total: progress_signal_calls.append((done, total)))
+        worker.enrichment_progress.connect(
+            lambda done, total: progress_signal_calls.append((done, total))
+        )
 
         _run_and_wait(qtbot, worker)
 
@@ -126,6 +133,7 @@ class TestPipelineMode:
             fail_report_path,
             on_stage,
             enrichment_progress,
+            **kwargs,  # FIX: Accept cache_name and any other future kwargs
         ):
             on_stage("merge", "started")
             on_stage("merge", "completed")
@@ -134,7 +142,9 @@ class TestPipelineMode:
             on_stage("enrich", "started")
             enrichment_progress(1, 1)
             on_stage("enrich", "completed")
+
             Path(enriched_path).write_text("TY  - JOUR\nER  - \n", encoding="utf-8")
+
             return PipelineResult(
                 cleaned_record_count=4,
                 cleaning_errors=[],
@@ -156,9 +166,12 @@ class TestPipelineMode:
             dedup_output_path=tmp_path / "clean.ris",
             enriched_output_path=tmp_path / "enriched.ris",
         )
+
         worker = PipelineWorker(config)
+
         results = []
         stage_events = []
+
         worker.finished_ok.connect(lambda r: results.append(r))
         worker.stage_changed.connect(lambda stage, status: stage_events.append((stage, status)))
 
@@ -194,7 +207,9 @@ class TestErrorHandling:
         assert "not found" in title.lower() or "not found" in message.lower()
         assert finished_calls == []  # must not report success
 
-    def test_unexpected_exception_is_caught_and_reported(self, qtbot, tmp_path, monkeypatch) -> None:
+    def test_unexpected_exception_is_caught_and_reported(
+        self, qtbot, tmp_path, monkeypatch
+    ) -> None:
         def fake_merge(input_paths, output_path):
             raise KeyError("secondary_title")  # simulates an unanticipated internal error
 

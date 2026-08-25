@@ -220,27 +220,18 @@ class TestPipelineCommandExecution:
     def test_multi_input_pipeline_uses_sensible_defaults_without_explicit_output(
         self, multi_source_paths, mock_enrichment, tmp_path
     ) -> None:
-        # Copy fixtures into tmp_path so default output paths land somewhere writable.
-        import shutil
-
-        local_paths = []
-        for source in multi_source_paths:
-            dest = tmp_path / source.name
-            shutil.copy(source, dest)
-            local_paths.append(dest)
-
+        # multi_source_paths already generates files directly inside tmp_path,
+        # so no copying is required. Copying them onto themselves raises SameFileError.
         parser = build_parser()
         args = parser.parse_args(
             [
                 "pipeline",
-                *[str(p) for p in local_paths],
+                *[str(p) for p in multi_source_paths],
                 "--email",
                 "you@example.com",
             ]
         )
-
         exit_code = args.func(args)
-
         assert exit_code == 0
         assert (tmp_path / "clean.ris").exists()
         assert (tmp_path / "enriched.ris").exists()

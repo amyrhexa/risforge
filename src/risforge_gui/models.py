@@ -1,10 +1,4 @@
-"""Table model for the list of input RIS files.
-
-Deliberately does not parse or count records itself -- that's done
-asynchronously by :mod:`risforge_gui.file_counter`, which calls
-``risforge.cleaning.parse_ris_records`` and reports back into this
-model. This module only tracks display state.
-"""
+"""Table model for input RIS files."""
 
 from __future__ import annotations
 
@@ -16,16 +10,16 @@ from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
 
 @dataclass
 class InputFileEntry:
-    """One row's state: a file path plus its (possibly still-pending) record count."""
+    """One input-file row."""
 
     path: Path
-    record_count: int | None = None  # None while counting is in progress.
+    record_count: int | None = None
     status: str = "Counting..."
     error_message: str | None = None
 
 
 class InputFilesModel(QAbstractTableModel):
-    """Backs the input-files QTableView: File | Records | Status."""
+    """Model for File | Records | Status."""
 
     COLUMNS = ("File", "Records", "Status")
 
@@ -33,13 +27,7 @@ class InputFilesModel(QAbstractTableModel):
         super().__init__(parent)
         self._entries: list[InputFileEntry] = []
 
-    # --- Qt model interface -----------------------------------------------
-
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:  # noqa: B008
-        # QModelIndex() as a default is the standard Qt Model/View idiom
-        # (used verbatim in Qt's own documentation): it's an immutable
-        # "invalid index" value, not mutable state that could leak
-        # between calls, so constructing it once at import time is safe.
         return 0 if parent.isValid() else len(self._entries)
 
     def columnCount(self, parent: QModelIndex = QModelIndex()) -> int:  # noqa: B008
@@ -51,16 +39,10 @@ class InputFilesModel(QAbstractTableModel):
         return None
 
     def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole):
-        """Return display/tooltip/alignment data for one cell.
-
-        Branches on ``role`` because Qt's view asks the model the same
-        question ("what goes in this cell?") several times with
-        different intents -- text to show, tooltip to show, how to
-        align it -- rather than the model exposing separate methods
-        per concern.
-        """
+        """Return display, tooltip, or alignment data."""
         if not index.isValid() or not (0 <= index.row() < len(self._entries)):
             return None
+
         entry = self._entries[index.row()]
         column = index.column()
 
@@ -71,22 +53,23 @@ class InputFilesModel(QAbstractTableModel):
                 return "Counting..." if entry.record_count is None else f"{entry.record_count:,}"
             if column == 2:
                 return entry.status
-        elif role == Qt.ItemDataRole.ToolTipRole:
+
+        if role == Qt.ItemDataRole.ToolTipRole:
             if column == 0:
                 return str(entry.path)
             if column == 2 and entry.error_message:
                 return entry.error_message
-        elif role == Qt.ItemDataRole.TextAlignmentRole and column == 1:
+
+        if role == Qt.ItemDataRole.TextAlignmentRole and column == 1:
             return Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+
         return None
 
     def flags(self, index: QModelIndex):
-        """Selectable but never editable -- this table is for review, not inline editing."""
         if not index.isValid():
             return Qt.ItemFlag.NoItemFlags
-        return Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
 
-    # --- Domain-specific API -----------------------------------------------
+        return Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
 
     def paths(self) -> list[Path]:
         return [entry.path for entry in self._entries]
@@ -96,12 +79,14 @@ class InputFilesModel(QAbstractTableModel):
         return any(entry.path.resolve() == resolved for entry in self._entries)
 
     def add_paths(self, paths: list[Path]) -> list[Path]:
-        """Add new files, skipping any already present. Returns what was actually added."""
+        """Add files, skipping duplicates."""
         added: list[Path] = []
         new_entries = []
+
         for path in paths:
             if self.is_present(path):
                 continue
+
             new_entries.append(InputFileEntry(path=path))
             added.append(path)
 
@@ -110,6 +95,7 @@ class InputFilesModel(QAbstractTableModel):
             self.beginInsertRows(QModelIndex(), start, start + len(new_entries) - 1)
             self._entries.extend(new_entries)
             self.endInsertRows()
+
         return added
 
     def remove_rows(self, rows: list[int]) -> None:
@@ -122,6 +108,7 @@ class InputFilesModel(QAbstractTableModel):
     def clear(self) -> None:
         if not self._entries:
             return
+
         self.beginResetModel()
         self._entries.clear()
         self.endResetModel()
@@ -132,19 +119,24 @@ class InputFilesModel(QAbstractTableModel):
     def set_error(self, path: Path, message: str) -> None:
         self._update_row(path, record_count=None, status="Error", error_message=message)
 
-    def _update_row(self, path: Path, **fields) -> None:
-        resolved = path.resolve()
-        for row, entry in enumerate(self._entries):
-            if entry.path.resolve() == resolved:
-                for key, value in fields.items():
-                    setattr(entry, key, value)
-                top_left = self.index(row, 0)
-                bottom_right = self.index(row, len(self.COLUMNS) - 1)
-                self.dataChanged.emit(top_left, bottom_right)
-                return
-
     def total_known_records(self) -> int | None:
-        """Sum of counted records, or None while any entry is still pending/errored."""
+        """Sum record counts, or None while any file is pending."""
         if any(entry.record_count is None for entry in self._entries):
             return None
+
         return sum(entry.record_count or 0 for entry in self._entries)
+
+    def _update_row(self, path: Path, **fields) -> None:
+        resolved = path.resolve()
+
+        for row, entry in enumerate(self._entries):
+            if entry.path.resolve() != resolved:
+                continue
+
+            for key, value in fields.items():
+                setattr(entry, key, value)
+
+            top_left = self.index(row, 0)
+            bottom_right = self.index(row, len(self.COLUMNS) - 1)
+            self.dataChanged.emit(top_left, bottom_right)
+            return

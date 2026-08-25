@@ -138,14 +138,14 @@ class TestEnrichFile:
         input_path = tmp_path / "clean.ris"
         output_path = tmp_path / "enriched.ris"
 
-        rispy.dump(
-            [{"type_of_reference": "JOUR", "doi": "10.1016/j.neuroimage.2021.00001"}],
-            open(input_path, "w", encoding="utf-8"),
-        )
+        with open(input_path, "w", encoding="utf-8") as f:
+            rispy.dump(
+                [{"type_of_reference": "JOUR", "doi": "10.1016/j.neuroimage.2021.00001"}],
+                f,
+            )
 
         enricher, _session = _make_enricher()
         stats = enricher.enrich_file(input_path=input_path, output_path=output_path)
-
         assert output_path.exists()
         assert stats["processed"] == 1
         assert stats["enriched"] == 1

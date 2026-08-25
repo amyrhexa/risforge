@@ -9,7 +9,6 @@ from risforge.merging import MergeResult, merge_ris_files
 class TestMergeTwoFiles:
     def test_record_count_is_the_sum_of_both_files(self, sample_ris_path, tmp_path) -> None:
         output_path = tmp_path / "merged.ris"
-
         result = merge_ris_files([sample_ris_path, sample_ris_path], output_path)
 
         assert isinstance(result, MergeResult)
@@ -23,14 +22,14 @@ class TestMergeTwoFiles:
         output_path = tmp_path / "merged.ris"
         merge_ris_files([sample_ris_path, sample_ris_path], output_path)
 
-        merged_records = list(rispy.load(open(output_path, encoding="utf-8")))
+        with open(output_path, encoding="utf-8") as f:
+            merged_records = list(rispy.load(f))
         assert len(merged_records) == 10
 
 
 class TestMergeThreeFiles:
     def test_merges_all_three_sources(self, multi_source_paths, tmp_path) -> None:
         output_path = tmp_path / "merged.ris"
-
         result = merge_ris_files(multi_source_paths, output_path)
 
         assert result.input_file_count == 3
@@ -41,11 +40,14 @@ class TestMergeThreeFiles:
         output_path = tmp_path / "merged.ris"
         merge_ris_files(multi_source_paths, output_path)
 
-        merged_records = list(rispy.load(open(output_path, encoding="utf-8")))
+        with open(output_path, encoding="utf-8") as f:
+            merged_records = list(rispy.load(f))
         titles = {r.get("title") for r in merged_records}
+
         assert "Cortical thickness changes in early Parkinson's disease" in titles
         assert "Machine learning applications in neuroimaging: a review" in titles
         assert "Structural connectome differences in schizophrenia" in titles
+
         # All three variants of the shared paper are present, unmerged.
         assert sum("Diffusion MRI Tractography" in (t or "") for t in titles) >= 1
         assert len(merged_records) == 6
@@ -54,17 +56,17 @@ class TestMergeThreeFiles:
 class TestMergeSingleFile:
     def test_list_with_one_file_preserves_all_records(self, sample_ris_path, tmp_path) -> None:
         output_path = tmp_path / "merged.ris"
-
         result = merge_ris_files([sample_ris_path], output_path)
 
         assert result.input_file_count == 1
         assert result.record_count == 5
-        merged_records = list(rispy.load(open(output_path, encoding="utf-8")))
+
+        with open(output_path, encoding="utf-8") as f:
+            merged_records = list(rispy.load(f))
         assert len(merged_records) == 5
 
     def test_bare_path_is_also_accepted(self, sample_ris_path, tmp_path) -> None:
         output_path = tmp_path / "merged.ris"
-
         result = merge_ris_files(sample_ris_path, output_path)
 
         assert result.input_file_count == 1
@@ -77,7 +79,8 @@ class TestMergeOutputValidity:
         merge_ris_files([sample_ris_path], output_path)
 
         # Must round-trip through rispy without error.
-        records = list(rispy.load(open(output_path, encoding="utf-8")))
+        with open(output_path, encoding="utf-8") as f:
+            records = list(rispy.load(f))
         assert len(records) == 5
         assert all("title" in r for r in records)
 
@@ -85,13 +88,24 @@ class TestMergeOutputValidity:
         output_path = tmp_path / "merged.ris"
         merge_ris_files(multi_source_paths, output_path)
 
-        merged_records = list(rispy.load(open(output_path, encoding="utf-8")))
+        with open(output_path, encoding="utf-8") as f:
+            merged_records = list(rispy.load(f))
+
+        # merge_ris_files concatenates records without deduplicating.
+        # The shared paper appears multiple times. We must find the specific
+        # copy originating from pubmed.ris, which is the one carrying the abstract.
         pubmed_copy = next(
-            r for r in merged_records if r.get("doi") == "10.1016/j.neuroimage.2022.99999"
+            (
+                r
+                for r in merged_records
+                if r.get("abstract")
+                == "Second copy of the same paper, carries an abstract the others lack."
+            ),
+            None,
         )
-        assert pubmed_copy.get("abstract") == (
-            "Second copy of the same paper, carries an abstract the others lack."
-        )
+
+        assert pubmed_copy is not None, "The pubmed record with the abstract was lost during merge."
+        assert pubmed_copy.get("doi") == "10.1016/j.neuroimage.2022.99999"
 
 
 class TestMalformedRecords:
@@ -99,18 +113,17 @@ class TestMalformedRecords:
         self, multi_source_paths, tmp_path
     ) -> None:
         output_path = tmp_path / "merged.ris"
-
-        result = merge_ris_files(multi_source_paths, output_path)
+        merge_ris_files(multi_source_paths, output_path)  # Removed `result = `
 
         # scopus.ris has 2 good records + 1 malformed block. Both good
         # scopus records must still be present.
-        merged_records = list(rispy.load(open(output_path, encoding="utf-8")))
+        with open(output_path, encoding="utf-8") as f:
+            merged_records = list(rispy.load(f))
         titles = {r.get("title") for r in merged_records}
         assert "Cortical thickness changes in early Parkinson's disease" in titles
 
     def test_error_identifies_the_source_file(self, multi_source_paths, tmp_path) -> None:
         output_path = tmp_path / "merged.ris"
-
         result = merge_ris_files(multi_source_paths, output_path)
 
         assert len(result.errors) == 1
@@ -122,8 +135,8 @@ class TestEmptyRisFile:
     def test_empty_file_contributes_zero_records(self, tmp_path) -> None:
         empty_file = tmp_path / "empty.ris"
         empty_file.write_text("", encoding="utf-8")
-        output_path = tmp_path / "merged.ris"
 
+        output_path = tmp_path / "merged.ris"
         result = merge_ris_files([empty_file], output_path)
 
         assert result.record_count == 0
@@ -133,8 +146,8 @@ class TestEmptyRisFile:
     def test_empty_file_mixed_with_a_real_file(self, sample_ris_path, tmp_path) -> None:
         empty_file = tmp_path / "empty.ris"
         empty_file.write_text("", encoding="utf-8")
-        output_path = tmp_path / "merged.ris"
 
+        output_path = tmp_path / "merged.ris"
         result = merge_ris_files([empty_file, sample_ris_path], output_path)
 
         assert result.input_file_count == 2
@@ -144,7 +157,6 @@ class TestEmptyRisFile:
 class TestMissingInputFile:
     def test_raises_file_not_found_naming_the_missing_file(self, tmp_path) -> None:
         missing = tmp_path / "does_not_exist.ris"
-
         with pytest.raises(FileNotFoundError, match="does_not_exist.ris"):
             merge_ris_files([missing], tmp_path / "out.ris")
 
@@ -152,7 +164,6 @@ class TestMissingInputFile:
         self, sample_ris_path, tmp_path
     ) -> None:
         missing = tmp_path / "does_not_exist.ris"
-
         with pytest.raises(FileNotFoundError, match="does_not_exist.ris"):
             merge_ris_files([sample_ris_path, missing], tmp_path / "out.ris")
 
@@ -171,10 +182,11 @@ class TestDeterministicOrdering:
         merge_ris_files(multi_source_paths, forward_path)
         merge_ris_files(list(reversed(multi_source_paths)), reversed_path)
 
-        forward_titles = [r.get("title") for r in rispy.load(open(forward_path, encoding="utf-8"))]
-        reversed_titles = [
-            r.get("title") for r in rispy.load(open(reversed_path, encoding="utf-8"))
-        ]
+        with open(forward_path, encoding="utf-8") as f:
+            forward_titles = [r.get("title") for r in rispy.load(f)]
+
+        with open(reversed_path, encoding="utf-8") as f:
+            reversed_titles = [r.get("title") for r in rispy.load(f)]
 
         # Records from the first input file (scopus, 2 records) come
         # first when scopus is listed first, and last when it's listed last.

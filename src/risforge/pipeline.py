@@ -1,25 +1,4 @@
-"""Orchestrates the merge (optional) -> clean -> enrich pipeline.
-
-This is a generalization of the original ``help.py``. The core
-workflow is unchanged (clean/dedupe, then enrich), but it now also
-accepts *multiple* input files:
-
-    one input   -> clean_ris_file() -> RisEnricher.enrich_file()
-    2+ inputs   -> merge_ris_files() -> clean_ris_file() -> RisEnricher.enrich_file()
-
-The merge step only happens for multiple inputs -- a single input goes
-straight to cleaning, exactly like the original single-file pipeline,
-with no intermediate merged file created.
-
-Public API
-----------
-:func:`risforge` is the preferred entry point (named after the
-package, per the desired public API). :func:`run_pipeline` is kept as
-a plain backward-compatible alias/wrapper for existing callers of the
-pre-0.2.0 API -- including callers who used the original
-``input_path=`` keyword argument, which :func:`risforge` renamed to
-``input_paths`` to reflect that it now accepts more than one file.
-"""
+"""Pipeline orchestration: merge (optional), clean, enrich."""
 
 from __future__ import annotations
 
@@ -38,22 +17,12 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class PipelineResult:
-    """Outcome of a full merge(optional) -> clean -> enrich pipeline run.
-
-    The first three fields (``cleaned_record_count``,
-    ``cleaning_errors``, ``enrichment_stats``) are unchanged from the
-    pre-0.2.0 release -- existing code reading those attributes, or
-    constructing a ``PipelineResult`` positionally with just those
-    three values, continues to work unmodified. The remaining fields
-    are additive.
-    """
+    """Result of a full merge/clean/enrich pipeline run."""
 
     cleaned_record_count: int
     cleaning_errors: list[tuple[int, str]]
     enrichment_stats: dict[str, Any] = field(default_factory=dict)
 
-    # Added in 0.2.0 for multi-input pipelines. All have safe defaults
-    # so existing positional/keyword construction is unaffected.
     input_file_count: int = 1
     merged_record_count: int | None = None
     merge_path: Path | None = None
@@ -64,26 +33,26 @@ class PipelineResult:
 def _normalize_input_paths(
     input_paths: str | Path | Sequence[str | Path],
 ) -> list[Path]:
-    """Coerce the flexible ``input_paths`` argument into a concrete path list."""
+    """Convert flexible input-path arguments into a list of paths."""
     if isinstance(input_paths, (str, Path)):
         return [Path(input_paths)]
 
-    paths = [Path(p) for p in input_paths]
+    paths = [Path(path) for path in input_paths]
+
     if not paths:
         raise ValueError("risforge() requires at least one input path.")
+
     return paths
 
 
 def _default_merge_path(dedup_path: str | Path) -> Path:
-    """Default location for the intermediate merged file.
-
-    Deliberately does not derive from any single input file's name --
-    with several different sources being combined, a name like
-    ``scopus_merged.ris`` would misleadingly suggest the merge only
-    covers that one source. Instead it's placed next to ``dedup_path``
-    with a fixed, descriptive name.
-    """
+    """Return the default merged-file path next to the cleaned file."""
     return Path(dedup_path).with_name("merged.ris")
+
+
+def _notify_stage(callback: Callable[[str, str], None] | None, stage: str, status: str) -> None:
+    if callback is not None:
+        callback(stage, status)
 
 
 def risforge(
@@ -95,108 +64,56 @@ def risforge(
     fail_report_path: str | Path = "failed_records.json",
     on_stage: Callable[[str, str], None] | None = None,
     enrichment_progress: Callable[[int, int], None] | None = None,
+    cache_name: str | Path | None = None,
 ) -> PipelineResult:
-    """Run the full merge(optional) -> clean -> enrich pipeline end to end.
-
-    Given a single input file, this behaves exactly like the original
-    single-file pipeline: clean, then enrich, no merge step. Given two
-    or more input files, they're first combined with
-    :func:`risforge.merging.merge_ris_files` into an intermediate file,
-    which is then cleaned and enriched exactly as a single input would
-    be.
-
-    Args:
-        input_paths: One raw ``.ris`` export, or several. A bare path,
-            or a sequence of one path, skips merging entirely.
-        dedup_path: Where the cleaned/deduplicated intermediate file
-            is written.
-        enriched_path: Where the final enriched ``.ris`` file is
-            written.
-        email: Contact email passed to Crossref/OpenAlex/Unpaywall
-            (required by their usage policies).
-        merge_path: Where the intermediate merged file is written,
-            when multiple inputs are given. Defaults to a ``merged.ris``
-            file next to ``dedup_path`` (see :func:`_default_merge_path`).
-            Ignored for a single input, since no merge step runs.
-        fail_report_path: Where a JSON report of unresolved records is
-            written, if any.
-        on_stage: Optional callback invoked as ``on_stage(stage,
-            status)`` around each phase, with ``stage`` one of
-            ``"merge"`` (only when multiple inputs are given),
-            ``"clean"``, or ``"enrich"``, and ``status`` one of
-            ``"started"`` or ``"completed"``. Added for callers (such
-            as a GUI) that want to reflect pipeline progress without
-            polling the filesystem or reimplementing this function's
-            control flow. Never called when omitted.
-        enrichment_progress: Optional callback forwarded to
-            :meth:`risforge.enrichment.RisEnricher.enrich_file` as
-            ``progress_callback``, invoked as
-            ``enrichment_progress(processed_count, total_count)``
-            after each record. Never called when omitted.
-
-    Returns:
-        A :class:`PipelineResult` summarizing every phase that ran.
-
-    Raises:
-        ValueError: If ``input_paths`` is empty.
-        FileNotFoundError: If any input file does not exist. The
-            error message identifies which one.
-    """
+    """Run merge (if needed), clean, and enrich in one pipeline."""
     paths = _normalize_input_paths(input_paths)
     dedup_path = Path(dedup_path)
     enriched_path = Path(enriched_path)
 
-    logger.info("Starting RIS bibliographic pipeline...")
+    logger.info("Starting RIS pipeline with %d input file(s).", len(paths))
 
     merge_result: MergeResult | None = None
+
     if len(paths) > 1:
         resolved_merge_path = (
             Path(merge_path) if merge_path is not None else _default_merge_path(dedup_path)
         )
-        logger.info("Phase 0: Merging %d input files into %s", len(paths), resolved_merge_path)
-        if on_stage is not None:
-            on_stage("merge", "started")
+
+        _notify_stage(on_stage, "merge", "started")
         merge_result = merge_ris_files(paths, resolved_merge_path)
-        if on_stage is not None:
-            on_stage("merge", "completed")
-        logger.info(
-            "Phase 0 complete: merged %d record(s) from %d file(s).",
-            merge_result.record_count,
-            merge_result.input_file_count,
-        )
-        clean_input: str | Path = resolved_merge_path
+        _notify_stage(on_stage, "merge", "completed")
+
+        clean_input: Path = resolved_merge_path
     else:
         clean_input = paths[0]
 
-    logger.info("Phase 1: Deduplicating %s", clean_input)
-    if on_stage is not None:
-        on_stage("clean", "started")
+    _notify_stage(on_stage, "clean", "started")
     records, errors = clean_ris_file(clean_input, dedup_path)
-    if on_stage is not None:
-        on_stage("clean", "completed")
-    logger.info("Phase 1 complete: generated %d clean records.", len(records))
-    if errors:
-        logger.warning("Encountered %d parsing errors during Phase 1.", len(errors))
+    _notify_stage(on_stage, "clean", "completed")
 
-    logger.info("Phase 2: Initializing metadata enrichment via APIs")
-    if on_stage is not None:
-        on_stage("enrich", "started")
-    enricher = RisEnricher(email=email)
+    if errors:
+        logger.warning("Cleaning completed with %d parse error(s).", len(errors))
+
+    _notify_stage(on_stage, "enrich", "started")
+
+    enricher = RisEnricher(email=email, cache_name=cache_name or ".api_cache")
     stats = enricher.enrich_file(
         input_path=dedup_path,
         output_path=enriched_path,
         fail_report_path=fail_report_path,
         progress_callback=enrichment_progress,
     )
-    if on_stage is not None:
-        on_stage("enrich", "completed")
+
+    _notify_stage(on_stage, "enrich", "completed")
+
     logger.info(
-        "Phase 2 complete: enriched %d/%d records.",
+        "Pipeline complete: cleaned=%d enriched=%d/%d",
+        len(records),
         stats.get("enriched", 0),
         stats.get("processed", 0),
     )
 
-    logger.info("Pipeline execution finished successfully.")
     return PipelineResult(
         cleaned_record_count=len(records),
         cleaning_errors=errors,
@@ -216,14 +133,7 @@ def run_pipeline(
     email: str,
     fail_report_path: str | Path = "failed_records.json",
 ) -> PipelineResult:
-    """Backward-compatible alias for :func:`risforge` (pre-0.2.0 API).
-
-    Retained unchanged -- same parameter name (``input_path``,
-    singular), same single-file-only behavior -- for existing code
-    written against the 0.1.x release. New code should prefer
-    :func:`risforge`, which accepts this same single-file call exactly
-    as before, or multiple files.
-    """
+    """Backward-compatible single-file pipeline API."""
     return risforge(
         input_paths=input_path,
         dedup_path=dedup_path,
