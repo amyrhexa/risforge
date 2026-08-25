@@ -1,21 +1,4 @@
-"""Runs a risforge operation on a background thread.
-
-This is the single integration point between the GUI and the
-``risforge`` core package. Every branch below calls a real,
-already-public risforge function or method -- it does not
-reimplement merging, cleaning, deduplication, or enrichment. Where the
-core package didn't previously expose a way to observe progress
-mid-operation (``RisEnricher.enrich_file``'s ``progress_callback`` and
-``risforge()``'s ``on_stage``/``enrichment_progress`` parameters), that
-was added directly to the core package as small, optional,
-backward-compatible hooks -- not duplicated here.
-
-Threading model: :class:`PipelineWorker` is a ``QThread``. Only its
-``run()`` method executes on the worker thread; the instance itself is
-created on (and its signals are received on) the GUI thread, so Qt's
-queued cross-thread signal delivery applies automatically. No widget
-is ever touched from inside ``run()`` -- only signals are emitted.
-"""
+"""Background worker executing risforge operations."""
 
 from __future__ import annotations
 
@@ -38,79 +21,64 @@ class OperationMode(str, Enum):
 
 @dataclass
 class PipelineConfig:
-    """Everything a run needs, gathered from the GUI's config screens."""
+    """Configuration for one GUI run."""
 
     mode: OperationMode
     input_paths: list[Path]
 
-    # Enrichment.
     email: str = ""
     cache_path: Path | None = None
     request_delay_seconds: float = 0.1
     fail_report_path: Path = field(default_factory=lambda: Path("failed_records.json"))
 
-    # Output.
     merge_output_path: Path | None = None
     dedup_output_path: Path | None = None
     enriched_output_path: Path | None = None
 
 
 class _LogBridge(logging.Handler):
-    """Forwards risforge's own log records to a Qt signal.
-
-    Reuses the log messages the core package already produces (see
-    each module's ``logger.info``/``logger.warning`` calls) instead of
-    inventing a parallel set of GUI-side status strings.
-    """
+    """Forwards risforge logs into Qt signals."""
 
     def __init__(self, log_signal: Signal) -> None:
         super().__init__(level=logging.INFO)
         self._log_signal = log_signal
 
     def emit(self, record: logging.LogRecord) -> None:
-        """Map a stdlib log level to the three-tier severity the GUI displays.
-
-        The log panel only distinguishes INFO/WARNING/ERROR (matching
-        the UI's three status colors); DEBUG-and-below is never
-        forwarded at all (the handler is installed at level INFO).
-        """
         if record.levelno >= logging.ERROR:
             level = "ERROR"
         elif record.levelno >= logging.WARNING:
             level = "WARNING"
         else:
             level = "INFO"
+
         self._log_signal.emit(level, record.getMessage())
 
 
 class PipelineWorker(QThread):
-    """Runs one risforge operation (per ``PipelineConfig.mode``) off the GUI thread."""
+    """Runs one risforge operation off the GUI thread."""
 
-    stage_changed = Signal(str, str)  # stage, status ("started" | "completed")
-    enrichment_progress = Signal(int, int)  # processed, total
-    log_message = Signal(str, str)  # level, message
+    stage_changed = Signal(str, str)
+    enrichment_progress = Signal(int, int)
+    log_message = Signal(str, str)
     stats_changed = Signal(dict)
-    error_occurred = Signal(str, str, str, str)  # title, message, details, affected_file
-    finished_ok = Signal(object)  # PipelineResult | MergeResult | dict | tuple
+    error_occurred = Signal(str, str, str, str)
+    finished_ok = Signal(object)
 
     def __init__(self, config: PipelineConfig, parent=None) -> None:
         super().__init__(parent)
         self._config = config
 
     def run(self) -> None:
-        """Execute the configured operation and always emit a terminal signal.
-
-        Every exception type risforge's own API documents raising is
-        translated into a human-readable error_occurred signal instead
-        of propagating out of the thread (which would terminate it
-        silently, with nothing visible to the user at all).
-        """
+        """Execute the operation and always emit a terminal signal."""
         log_bridge = _LogBridge(self.log_message)
-        risforge_logger = logging.getLogger("risforge")
-        risforge_logger.addHandler(log_bridge)
-        risforge_logger.setLevel(logging.INFO)
+        core_logger = logging.getLogger("risforge")
+
+        core_logger.addHandler(log_bridge)
+        old_level = core_logger.level
+        core_logger.setLevel(logging.INFO)
+
         try:
-            self._run()
+            self._dispatch()
         except FileNotFoundError as error:
             self._report_error(
                 title="A file could not be found",
@@ -131,11 +99,6 @@ class PipelineWorker(QThread):
                 details=repr(error),
             )
         except Exception as error:  # noqa: BLE001
-            # Deliberate, sole broad catch in the GUI: a QThread that
-            # raises out of run() terminates silently with no signal
-            # and no visible error at all -- worse than a generic
-            # message. Every other branch above already handles the
-            # exception types risforge's own API documents raising.
             import traceback
 
             self._report_error(
@@ -144,12 +107,12 @@ class PipelineWorker(QThread):
                 details=traceback.format_exc(),
             )
         finally:
-            risforge_logger.removeHandler(log_bridge)
+            core_logger.removeHandler(log_bridge)
+            core_logger.setLevel(old_level)
 
-    # --- Dispatch -----------------------------------------------------------
-
-    def _run(self) -> None:
+    def _dispatch(self) -> None:
         config = self._config
+
         if config.mode is OperationMode.MERGE:
             self._run_merge(config)
         elif config.mode is OperationMode.CLEAN:
@@ -160,38 +123,56 @@ class PipelineWorker(QThread):
             self._run_pipeline(config)
 
     def _run_merge(self, config: PipelineConfig) -> None:
-        assert config.merge_output_path is not None
+        output_path = self._required_path(config.merge_output_path, "Merge output path")
+
         self.stage_changed.emit("merge", "started")
-        result = merge_ris_files(config.input_paths, config.merge_output_path)
+        result = merge_ris_files(config.input_paths, output_path)
         self.stage_changed.emit("merge", "completed")
+
         self.stats_changed.emit(
-            {"input_files": result.input_file_count, "merged_records": result.record_count}
+            {
+                "input_files": result.input_file_count,
+                "merged_records": result.record_count,
+            }
         )
+
         self.finished_ok.emit(result)
 
     def _run_clean(self, config: PipelineConfig) -> None:
-        assert config.dedup_output_path is not None
+        input_path = self._required_input(config)
+        output_path = self._required_path(config.dedup_output_path, "Clean output path")
+
         self.stage_changed.emit("clean", "started")
-        records, errors = clean_ris_file(config.input_paths[0], config.dedup_output_path)
+        records, errors = clean_ris_file(input_path, output_path)
         self.stage_changed.emit("clean", "completed")
+
         self.stats_changed.emit({"unique_records": len(records)})
         self.finished_ok.emit((records, errors))
 
     def _run_enrich(self, config: PipelineConfig) -> None:
-        assert config.enriched_output_path is not None
+        input_path = self._required_input(config)
+        output_path = self._required_path(config.enriched_output_path, "Enriched output path")
+
+        if not config.email:
+            raise ValueError("An email address is required for enrichment.")
+
         self.stage_changed.emit("enrich", "started")
+
         enricher = RisEnricher(
             email=config.email,
             cache_name=config.cache_path or ".api_cache",
         )
+
         stats = enricher.enrich_file(
-            input_path=config.input_paths[0],
-            output_path=config.enriched_output_path,
+            input_path=input_path,
+            output_path=output_path,
             fail_report_path=config.fail_report_path,
             request_delay_seconds=config.request_delay_seconds,
             progress_callback=self._on_enrichment_progress,
         )
+
         self.stage_changed.emit("enrich", "completed")
+
         self.stats_changed.emit(
             {
                 "enriched_records": stats.get("enriched", 0),
@@ -199,21 +180,28 @@ class PipelineWorker(QThread):
                 "skipped_malformed": stats.get("skipped_malformed", 0),
             }
         )
+
         self.finished_ok.emit(stats)
 
     def _run_pipeline(self, config: PipelineConfig) -> None:
-        assert config.dedup_output_path is not None
-        assert config.enriched_output_path is not None
+        dedup_path = self._required_path(config.dedup_output_path, "Clean output path")
+        enriched_path = self._required_path(config.enriched_output_path, "Enriched output path")
+
+        if not config.email:
+            raise ValueError("An email address is required for enrichment.")
+
         result = risforge(
             input_paths=config.input_paths,
-            dedup_path=config.dedup_output_path,
-            enriched_path=config.enriched_output_path,
+            dedup_path=dedup_path,
+            enriched_path=enriched_path,
             email=config.email,
             merge_path=config.merge_output_path,
             fail_report_path=config.fail_report_path,
             on_stage=self._on_stage,
             enrichment_progress=self._on_enrichment_progress,
+            cache_name=config.cache_path or ".api_cache",
         )
+
         self.stats_changed.emit(
             {
                 "input_files": result.input_file_count,
@@ -224,9 +212,8 @@ class PipelineWorker(QThread):
                 "skipped_malformed": result.enrichment_stats.get("skipped_malformed", 0),
             }
         )
-        self.finished_ok.emit(result)
 
-    # --- Callbacks passed into the core API (invoked on this thread) -------
+        self.finished_ok.emit(result)
 
     def _on_stage(self, stage: str, status: str) -> None:
         self.stage_changed.emit(stage, status)
@@ -234,21 +221,28 @@ class PipelineWorker(QThread):
     def _on_enrichment_progress(self, processed: int, total: int) -> None:
         self.enrichment_progress.emit(processed, total)
 
-    # --- Error reporting -----------------------------------------------------
-
     def _report_error(
-        self, title: str, message: str, details: str = "", affected_file: str | None = None
+        self,
+        title: str,
+        message: str,
+        details: str = "",
+        affected_file: str | None = None,
     ) -> None:
         self.error_occurred.emit(title, message, details, affected_file or "")
 
     def _guess_affected_file(self) -> str | None:
-        """Best-effort: name the first configured input file in a FileNotFoundError.
-
-        risforge's own FileNotFoundError messages already include the
-        specific missing path (see clean_ris_file/parse_ris_records),
-        so this is only a fallback label for the error dialog's
-        "affected file" field, not the source of truth.
-        """
         if self._config.input_paths:
             return str(self._config.input_paths[0])
         return None
+
+    @staticmethod
+    def _required_input(config: PipelineConfig) -> Path:
+        if not config.input_paths:
+            raise ValueError("At least one input file is required.")
+        return config.input_paths[0]
+
+    @staticmethod
+    def _required_path(path: Path | None, label: str) -> Path:
+        if path is None:
+            raise ValueError(f"{label} is required.")
+        return path

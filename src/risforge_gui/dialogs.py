@@ -1,9 +1,4 @@
-"""Error and confirmation dialogs.
-
-Errors are always shown with a plain-language message first. Technical
-detail (exception repr / traceback) is available but hidden behind
-Qt's built-in "Show Details..." expander -- never shown by default.
-"""
+"""Error and confirmation dialogs."""
 
 from __future__ import annotations
 
@@ -19,7 +14,7 @@ def show_error_dialog(
     details: str = "",
     affected_file: str = "",
 ) -> None:
-    """Show a human-readable error, with technical details available on demand."""
+    """Show a human-readable error with optional technical details."""
     box = QMessageBox(parent)
     box.setIcon(QMessageBox.Icon.Critical)
     box.setWindowTitle("risforge")
@@ -27,7 +22,8 @@ def show_error_dialog(
 
     informative = message
     if affected_file:
-        informative = f"File: {affected_file}\n\n{message}"
+        informative = f"File: {affected_file}\n{message}"
+
     box.setInformativeText(informative)
 
     if details:
@@ -38,7 +34,7 @@ def show_error_dialog(
 
 
 def confirm_overwrite(parent: QWidget | None, path: Path) -> bool:
-    """Ask before overwriting an existing output file. Defaults to No (safe)."""
+    """Ask before overwriting an existing file."""
     result = QMessageBox.question(
         parent,
         "File already exists",
@@ -46,4 +42,5 @@ def confirm_overwrite(parent: QWidget | None, path: Path) -> bool:
         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         QMessageBox.StandardButton.No,
     )
+
     return result == QMessageBox.StandardButton.Yes

@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,gui]" # Added gui extra so pytest-qt doesn't fail on imports
+
+      - name: Install Qt dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 libxcb-xfixes0 x11-utils
+
+      - name: Lint with Ruff and Black
+        run: |
+          ruff check .
+          black --check .  # Changed from ruff format to match pyproject.toml
+
+      - name: Test with pytest
+        run: |
+          export QT_QPA_PLATFORM=offscreen
+          pytest --cov=risforge --cov=risforge_gui --cov-report=xml # Added risforge core
+
+      - name: Build package
+        run: |
+          python -m build
+
+      - name: Check package with twine
+        run: |
+          twine check dist/*
