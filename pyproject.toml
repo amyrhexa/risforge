@@ -48,10 +48,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/amyr/risforge"
-Repository = "https://github.com/amyr/risforge"
-Issues = "https://github.com/amyr/risforge/issues"
-Changelog = "https://github.com/amyr/risforge/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/amyrhexa/risforge"
+Repository = "https://github.com/amyrhexa/risforge"
+Issues = "https://github.com/amyrhexa/risforge/issues"
+Changelog = "https://github.com/amyrhexa/risforge/blob/main/CHANGELOG.md"
 
 [project.scripts]
 risforge = "risforge.cli:main"
